@@ -12,41 +12,33 @@ const CONFIG = {
   // Meeting details
   MEETING_TIME: '15:00 CET',
   MEETING_DAY: 'Monday',
-  SEMESTER_START: '2026-03-16',
-  SEMESTER_END: '2026-06-29',
+
+  // Current semester (6-month schedule cycle)
+  // To start a new semester: update label, start, end, and HOLIDAYS
+  SEMESTER: {
+    label: 'Spring 2026',
+    start: '2026-03-30',
+    end: '2026-09-28'
+  },
+
+  // Geneva, Switzerland public holidays that fall on meeting Mondays
+  // Update this array each semester. Only include dates within the semester range.
+  HOLIDAYS: [
+    { date: '2026-04-06', label: 'Easter Monday' },
+    { date: '2026-05-25', label: 'Whit Monday' }
+  ],
+
+  // Number of buffer weeks per semester (spread evenly through non-holiday dates)
+  BUFFER_WEEKS: 2,
+
+  // Opt-out deadline: must opt out at least this many days before the meeting
+  // 6 days before Monday = by end of Tuesday of the prior week
+  OPT_OUT_DEADLINE_DAYS: 6,
 
   // Members in round-robin order
   MEMBERS: [
     'Andreas', 'Frank', 'Giovanni', 'Guillaume', 'Ivan',
     'Jona', 'Matej', 'Pradyun', 'Stephen', 'Theresa', 'Vincent'
-  ],
-
-  // 16 verified Mondays: March 16 – June 29, 2026
-  DATES: [
-    '2026-03-16', '2026-03-23', '2026-03-30',
-    '2026-04-06', '2026-04-13', '2026-04-20', '2026-04-27',
-    '2026-05-04', '2026-05-11', '2026-05-18', '2026-05-25',
-    '2026-06-01', '2026-06-08', '2026-06-15', '2026-06-22', '2026-06-29'
-  ],
-
-  // Pre-computed round-robin schedule
-  DEFAULT_SCHEDULE: [
-    { week: 1, date: '2026-03-16', presenter: 'Andreas', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 2, date: '2026-03-23', presenter: 'Frank', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 3, date: '2026-03-30', presenter: 'Giovanni', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 4, date: '2026-04-06', presenter: 'Guillaume', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 5, date: '2026-04-13', presenter: 'Ivan', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 6, date: '2026-04-20', presenter: 'Jona', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 7, date: '2026-04-27', presenter: 'Matej', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 8, date: '2026-05-04', presenter: 'Pradyun', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 9, date: '2026-05-11', presenter: 'Stephen', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 10, date: '2026-05-18', presenter: 'Theresa', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 11, date: '2026-05-25', presenter: 'Vincent', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 12, date: '2026-06-01', presenter: 'Andreas', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 13, date: '2026-06-08', presenter: 'Frank', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 14, date: '2026-06-15', presenter: 'Giovanni', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 15, date: '2026-06-22', presenter: 'Guillaume', type: '', topic: '', abstract: '', status: 'TBD' },
-    { week: 16, date: '2026-06-29', presenter: 'Ivan', type: '', topic: '', abstract: '', status: 'TBD' }
   ],
 
   // Presentation types
@@ -59,3 +51,22 @@ const CONFIG = {
     'Professional Development'
   ]
 };
+
+// Compute all Mondays in the semester range dynamically.
+// No need to maintain a manual DATES array — just change SEMESTER.start/end.
+CONFIG.DATES = (function() {
+  var dates = [];
+  var current = new Date(CONFIG.SEMESTER.start + 'T00:00:00');
+  var end = new Date(CONFIG.SEMESTER.end + 'T00:00:00');
+  // Ensure we start on a Monday (day 1)
+  var dow = current.getDay();
+  if (dow !== 1) current.setDate(current.getDate() + ((8 - dow) % 7));
+  while (current <= end) {
+    var y = current.getFullYear();
+    var m = ('0' + (current.getMonth() + 1)).slice(-2);
+    var d = ('0' + current.getDate()).slice(-2);
+    dates.push(y + '-' + m + '-' + d);
+    current.setDate(current.getDate() + 7);
+  }
+  return dates;
+})();

@@ -8,12 +8,14 @@
  * After deploying, copy the Web App URL into js/config.js
  * Set the shared secret in Script Properties (key: SECRET)
  *
- * Sheet tabs required: Schedule, Members, OptOuts, Log
+ * Sheet tabs: Schedule, Members, OptOuts, Log, PollResponses, Archive
  */
 
 // ============================================================
 // Configuration
 // ============================================================
+
+var OPT_OUT_DEADLINE_DAYS = 6;
 
 function getSecret() {
   return PropertiesService.getScriptProperties().getProperty('SECRET') || '';
@@ -37,12 +39,16 @@ function doGet(e) {
   var schedule = readSchedule(ss);
   var members = readMembers(ss);
   var optOuts = readOptOuts(ss);
+  var archive = readArchive(ss);
+  var pollResponses = readPollResponses(ss);
 
   return jsonResponse({
     success: true,
     schedule: schedule,
     members: members,
-    optOuts: optOuts
+    optOuts: optOuts,
+    archive: archive,
+    pollResponses: pollResponses
   });
 }
 
@@ -85,6 +91,12 @@ function doPost(e) {
       case 'updateCredits':
         result = handleUpdateCredits(body);
         break;
+      case 'submitPoll':
+        result = handleSubmitPoll(body);
+        break;
+      case 'archiveAndSave':
+        result = handleArchiveAndSave(body);
+        break;
       default:
         result = { success: false, error: 'Unknown action: ' + action };
     }
@@ -114,26 +126,19 @@ function handleVolunteer(body) {
   var statusCol = headers.indexOf('Status');
 
   var targetDate = body.date;
-  var rowIndex = -1;
-
-  for (var i = 1; i < data.length; i++) {
-    var cellDate = formatSheetDate(data[i][dateCol]);
-    if (cellDate === targetDate) {
-      rowIndex = i + 1; // 1-indexed for Sheets
-      break;
-    }
-  }
+  var rowIndex = findRowByDate(data, dateCol, targetDate);
 
   if (rowIndex === -1) {
     return { success: false, error: 'Date not found in schedule: ' + targetDate };
   }
 
   var currentPresenter = data[rowIndex - 1][presCol] || '';
-  var currentStatus = data[rowIndex - 1][statusCol] || '';
+  var currentStatus = (data[rowIndex - 1][statusCol] || '').toString();
+  var reversedCancellation = (currentStatus === 'Cancelled');
 
-  // Add as additional presenter if someone is already assigned (and slot isn't empty)
+  // Add as additional presenter if slot already has someone (and isn't empty/cancelled/buffer)
   var newPresenter;
-  if (currentPresenter && currentStatus !== 'Empty') {
+  if (currentPresenter && currentStatus !== 'Empty' && currentStatus !== 'Cancelled' && currentStatus !== 'Buffer') {
     newPresenter = currentPresenter + ' & ' + body.name;
   } else {
     newPresenter = body.name;
@@ -145,9 +150,13 @@ function handleVolunteer(body) {
   sheet.getRange(rowIndex, abstractCol + 1).setValue(body.abstract || '');
   sheet.getRange(rowIndex, statusCol + 1).setValue('Volunteered');
 
-  logAction(ss, 'volunteer', body.name + ' volunteered for ' + targetDate + ': ' + (body.topic || ''));
+  var logMsg = body.name + ' volunteered for ' + targetDate + ': ' + (body.topic || '');
+  if (reversedCancellation) {
+    logMsg += ' (reversed auto-cancellation)';
+  }
+  logAction(ss, 'volunteer', logMsg);
 
-  return { success: true };
+  return { success: true, reversedCancellation: reversedCancellation };
 }
 
 function handleOptOut(body) {
@@ -160,16 +169,17 @@ function handleOptOut(body) {
   var statusCol = headers.indexOf('Status');
 
   var targetDate = body.date;
-  var rowIndex = -1;
 
-  for (var i = 1; i < data.length; i++) {
-    var cellDate = formatSheetDate(data[i][dateCol]);
-    if (cellDate === targetDate) {
-      rowIndex = i + 1;
-      break;
-    }
+  // Enforce 6-day deadline
+  var meetingDate = new Date(targetDate + 'T00:00:00');
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var daysUntil = Math.round((meetingDate - today) / 86400000);
+  if (daysUntil < OPT_OUT_DEADLINE_DAYS) {
+    return { success: false, error: 'Opt-out deadline has passed (' + OPT_OUT_DEADLINE_DAYS + ' days before). Try swapping instead, or contact Pradyun.' };
   }
 
+  var rowIndex = findRowByDate(data, dateCol, targetDate);
   if (rowIndex === -1) {
     return { success: false, error: 'Date not found in schedule: ' + targetDate };
   }
@@ -189,9 +199,43 @@ function handleOptOut(body) {
   var optOutSheet = ss.getSheetByName('OptOuts');
   optOutSheet.appendRow([new Date(), body.name, targetDate, body.reason || '']);
 
-  logAction(ss, 'optOut', body.name + ' opted out of ' + targetDate + (body.reason ? ': ' + body.reason : ''));
+  // Try to move the member to the next available buffer week
+  var movedToBuffer = null;
+  if (remaining.length === 0) {
+    movedToBuffer = moveToNextBuffer(ss, sheet, data, headers, targetDate, body.name);
+  }
 
-  return { success: true };
+  var logMsg = body.name + ' opted out of ' + targetDate;
+  if (body.reason) logMsg += ': ' + body.reason;
+  if (movedToBuffer) logMsg += ' (moved to buffer: ' + movedToBuffer + ')';
+  logAction(ss, 'optOut', logMsg);
+
+  return { success: true, movedToBuffer: movedToBuffer };
+}
+
+/**
+ * Find the next buffer week after the given date and assign the member to it.
+ * Returns the buffer date string if successful, null otherwise.
+ */
+function moveToNextBuffer(ss, sheet, data, headers, afterDate, memberName) {
+  var dateCol = headers.indexOf('Date');
+  var presCol = headers.indexOf('Presenter');
+  var statusCol = headers.indexOf('Status');
+
+  for (var i = 1; i < data.length; i++) {
+    var cellDate = formatSheetDate(data[i][dateCol]);
+    var cellStatus = (data[i][statusCol] || '').toString();
+    var cellPresenter = (data[i][presCol] || '').toString();
+
+    if (cellDate > afterDate && cellStatus === 'Buffer' && !cellPresenter) {
+      var bufferRow = i + 1;
+      sheet.getRange(bufferRow, presCol + 1).setValue(memberName);
+      sheet.getRange(bufferRow, statusCol + 1).setValue('TBD');
+      logAction(ss, 'bufferAssign', memberName + ' moved to buffer week ' + cellDate + ' (opted out of ' + afterDate + ')');
+      return cellDate;
+    }
+  }
+  return null;
 }
 
 function handleSwap(body) {
@@ -202,13 +246,8 @@ function handleSwap(body) {
   var dateCol = headers.indexOf('Date');
   var presCol = headers.indexOf('Presenter');
 
-  var row1 = -1, row2 = -1;
-
-  for (var i = 1; i < data.length; i++) {
-    var cellDate = formatSheetDate(data[i][dateCol]);
-    if (cellDate === body.date1) row1 = i + 1;
-    if (cellDate === body.date2) row2 = i + 1;
-  }
+  var row1 = findRowByDate(data, dateCol, body.date1);
+  var row2 = findRowByDate(data, dateCol, body.date2);
 
   if (row1 === -1 || row2 === -1) {
     return { success: false, error: 'One or both dates not found.' };
@@ -217,7 +256,6 @@ function handleSwap(body) {
   var pres1 = (data[row1 - 1][presCol] || '').toString();
   var pres2 = (data[row2 - 1][presCol] || '').toString();
 
-  // Replace member1 with member2 in row1, and vice versa in row2
   var newPres1 = replaceMemberInList(pres1, body.member1, body.member2);
   var newPres2 = replaceMemberInList(pres2, body.member2, body.member1);
 
@@ -239,15 +277,7 @@ function handleAssignRandom(body) {
   var statusCol = headers.indexOf('Status');
 
   var targetDate = body.date;
-  var rowIndex = -1;
-
-  for (var i = 1; i < data.length; i++) {
-    var cellDate = formatSheetDate(data[i][dateCol]);
-    if (cellDate === targetDate) {
-      rowIndex = i + 1;
-      break;
-    }
-  }
+  var rowIndex = findRowByDate(data, dateCol, targetDate);
 
   if (rowIndex === -1) {
     return { success: false, error: 'Date not found.' };
@@ -257,7 +287,7 @@ function handleAssignRandom(body) {
   var currentStatus = (data[rowIndex - 1][statusCol] || '').toString();
 
   var newPresenter;
-  if (currentPresenter && currentStatus !== 'Empty') {
+  if (currentPresenter && currentStatus !== 'Empty' && currentStatus !== 'Buffer' && currentStatus !== 'Cancelled') {
     newPresenter = currentPresenter + ' & ' + body.name;
   } else {
     newPresenter = body.name;
@@ -291,6 +321,123 @@ function handleUpdateCredits(body) {
   logAction(ss, 'updateCredits', 'Credits updated');
 
   return { success: true };
+}
+
+function handleSubmitPoll(body) {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('PollResponses');
+
+  sheet.appendRow([
+    new Date(),
+    body.name || '',
+    body.unavailableDates || '',
+    body.preferredDate || ''
+  ]);
+
+  logAction(ss, 'submitPoll', body.name + ' submitted availability poll');
+
+  return { success: true };
+}
+
+function handleArchiveAndSave(body) {
+  var ss = getSpreadsheet();
+  var semesterLabel = body.semesterLabel || 'Unknown';
+  var newSchedule = body.newSchedule || [];
+
+  // Step 1: archive current schedule
+  var schedSheet = ss.getSheetByName('Schedule');
+  var schedData = schedSheet.getDataRange().getValues();
+  var archiveSheet = ss.getSheetByName('Archive');
+
+  for (var i = 1; i < schedData.length; i++) {
+    var row = schedData[i];
+    var dateVal = row[1]; // Date column
+    if (dateVal instanceof Date) {
+      dateVal = formatSheetDate(dateVal);
+    }
+    archiveSheet.appendRow([
+      semesterLabel,
+      row[0],  // Week
+      dateVal,
+      row[2],  // Presenter
+      row[3],  // Type
+      row[4],  // Topic
+      row[5],  // Abstract
+      row[6]   // Status
+    ]);
+  }
+
+  // Step 2: clear current schedule and write new one
+  schedSheet.clearContents();
+  schedSheet.appendRow(['Week', 'Date', 'Presenter', 'Type', 'Topic', 'Abstract', 'Status']);
+
+  if (newSchedule.length > 0) {
+    var rows = newSchedule.map(function(entry) {
+      return [
+        entry.week || '',
+        entry.date || '',
+        entry.presenter || '',
+        entry.type || '',
+        entry.topic || '',
+        entry.abstract || '',
+        entry.status || 'TBD'
+      ];
+    });
+    schedSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+
+  // Step 3: clear poll responses (consumed)
+  var pollSheet = ss.getSheetByName('PollResponses');
+  pollSheet.clearContents();
+  pollSheet.appendRow(['Timestamp', 'Name', 'UnavailableDates', 'PreferredDate']);
+
+  logAction(ss, 'archiveAndSave', 'Archived ' + semesterLabel + ', saved new schedule (' + newSchedule.length + ' weeks)');
+
+  return { success: true };
+}
+
+// ============================================================
+// Saturday auto-cancellation trigger
+// ============================================================
+
+/**
+ * Run this as a time-driven trigger every Saturday at midnight CET.
+ * Checks the coming Monday — if a slot is empty, marks it as 'Cancelled'.
+ *
+ * To set up:
+ *   1. In Apps Script, go to Triggers (clock icon)
+ *   2. Add trigger: checkSaturdayCancellation, Time-driven, Week timer, Every Saturday, Midnight to 1am
+ */
+function checkSaturdayCancellation() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Schedule');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var dateCol = headers.indexOf('Date');
+  var presCol = headers.indexOf('Presenter');
+  var statusCol = headers.indexOf('Status');
+
+  // Find the coming Monday (Saturday + 2 days)
+  var today = new Date();
+  var monday = new Date(today);
+  monday.setDate(monday.getDate() + 2);
+  var mondayStr = formatSheetDate(monday);
+
+  for (var i = 1; i < data.length; i++) {
+    var cellDate = formatSheetDate(data[i][dateCol]);
+    if (cellDate === mondayStr) {
+      var presenter = (data[i][presCol] || '').toString().trim();
+      var status = (data[i][statusCol] || '').toString().trim();
+
+      // Cancel if empty (no presenter, or status is Empty/Buffer with no presenter)
+      if (!presenter || status === 'Empty') {
+        var rowIndex = i + 1;
+        sheet.getRange(rowIndex, statusCol + 1).setValue('Cancelled');
+        logAction(ss, 'autoCancellation', 'Meeting on ' + mondayStr + ' auto-cancelled (no speaker by Saturday deadline)');
+      }
+      break;
+    }
+  }
 }
 
 // ============================================================
@@ -355,6 +502,48 @@ function readOptOuts(ss) {
   return result;
 }
 
+function readArchive(ss) {
+  var sheet = ss.getSheetByName('Archive');
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  var result = [];
+
+  for (var i = 1; i < data.length; i++) {
+    result.push({
+      semester: data[i][0] || '',
+      week: data[i][1],
+      date: formatSheetDate(data[i][2]),
+      presenter: data[i][3] || '',
+      type: data[i][4] || '',
+      topic: data[i][5] || '',
+      abstract: data[i][6] || '',
+      status: data[i][7] || 'TBD'
+    });
+  }
+
+  return result;
+}
+
+function readPollResponses(ss) {
+  var sheet = ss.getSheetByName('PollResponses');
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  var result = [];
+
+  for (var i = 1; i < data.length; i++) {
+    result.push({
+      timestamp: data[i][0],
+      name: data[i][1] || '',
+      unavailableDates: data[i][2] || '',
+      preferredDate: formatSheetDate(data[i][3])
+    });
+  }
+
+  return result;
+}
+
 // ============================================================
 // Utilities
 // ============================================================
@@ -370,9 +559,6 @@ function logAction(ss, action, details) {
   logSheet.appendRow([new Date(), action, details]);
 }
 
-/**
- * Format a Date object or string to YYYY-MM-DD
- */
 function formatSheetDate(val) {
   if (val instanceof Date) {
     var y = val.getFullYear();
@@ -380,13 +566,9 @@ function formatSheetDate(val) {
     var d = ('0' + val.getDate()).slice(-2);
     return y + '-' + m + '-' + d;
   }
-  // Already a string
   return (val || '').toString().trim().substring(0, 10);
 }
 
-/**
- * Replace one member name with another in a presenter list string
- */
 function replaceMemberInList(presenterStr, oldName, newName) {
   var parts = presenterStr.split(/[,&]/).map(function(s) { return s.trim(); }).filter(Boolean);
   var idx = parts.indexOf(oldName);
@@ -396,23 +578,27 @@ function replaceMemberInList(presenterStr, oldName, newName) {
   return parts.join(' & ');
 }
 
+/**
+ * Find a schedule row by date. Returns 1-indexed row number for Sheets, or -1.
+ */
+function findRowByDate(data, dateCol, targetDate) {
+  for (var i = 1; i < data.length; i++) {
+    var cellDate = formatSheetDate(data[i][dateCol]);
+    if (cellDate === targetDate) {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
 // ============================================================
 // Setup helpers
 // ============================================================
 
-/**
- * Safe setup — only fills tabs that have no data rows (skips if data exists).
- * Run this the first time.
- */
 function setupSheets() {
   _doSetup(false);
 }
 
-/**
- * Force setup — clears ALL tabs and re-populates from scratch.
- * Use this if setupSheets didn't populate correctly, or to start over.
- * WARNING: this erases any existing schedule data.
- */
 function resetAndSetupSheets() {
   _doSetup(true);
 }
@@ -426,22 +612,33 @@ function _doSetup(forceReset) {
     schedSheet.clearContents();
     schedSheet.appendRow(['Week', 'Date', 'Presenter', 'Type', 'Topic', 'Abstract', 'Status']);
     var schedData = [
-      [1,  '2026-03-16', 'Andreas',   '', '', '', 'TBD'],
-      [2,  '2026-03-23', 'Frank',     '', '', '', 'TBD'],
-      [3,  '2026-03-30', 'Giovanni',  '', '', '', 'TBD'],
-      [4,  '2026-04-06', 'Guillaume', '', '', '', 'TBD'],
-      [5,  '2026-04-13', 'Ivan',      '', '', '', 'TBD'],
-      [6,  '2026-04-20', 'Jona',      '', '', '', 'TBD'],
-      [7,  '2026-04-27', 'Matej',     '', '', '', 'TBD'],
-      [8,  '2026-05-04', 'Pradyun',   '', '', '', 'TBD'],
-      [9,  '2026-05-11', 'Stephen',   '', '', '', 'TBD'],
-      [10, '2026-05-18', 'Theresa',   '', '', '', 'TBD'],
-      [11, '2026-05-25', 'Vincent',   '', '', '', 'TBD'],
-      [12, '2026-06-01', 'Andreas',   '', '', '', 'TBD'],
-      [13, '2026-06-08', 'Frank',     '', '', '', 'TBD'],
-      [14, '2026-06-15', 'Giovanni',  '', '', '', 'TBD'],
-      [15, '2026-06-22', 'Guillaume', '', '', '', 'TBD'],
-      [16, '2026-06-29', 'Ivan',      '', '', '', 'TBD']
+      [1,  '2026-03-30', 'Andreas',       '', '', '', 'TBD'],
+      [2,  '2026-04-06', 'Easter Monday', '', '', '', 'Holiday'],
+      [3,  '2026-04-13', 'Frank',          '', '', '', 'TBD'],
+      [4,  '2026-04-20', 'Giovanni',      '', '', '', 'TBD'],
+      [5,  '2026-04-27', 'Guillaume',     '', '', '', 'TBD'],
+      [6,  '2026-05-04', 'Ivan',          '', '', '', 'TBD'],
+      [7,  '2026-05-11', 'Jona',          '', '', '', 'TBD'],
+      [8,  '2026-05-18', 'Matej',         '', '', '', 'TBD'],
+      [9,  '2026-05-25', 'Whit Monday',   '', '', '', 'Holiday'],
+      [10, '2026-06-01', '',              '', '', '', 'Buffer'],
+      [11, '2026-06-08', 'Pradyun',       '', '', '', 'TBD'],
+      [12, '2026-06-15', 'Stephen',       '', '', '', 'TBD'],
+      [13, '2026-06-22', 'Theresa',       '', '', '', 'TBD'],
+      [14, '2026-06-29', 'Vincent',       '', '', '', 'TBD'],
+      [15, '2026-07-06', 'Andreas',       '', '', '', 'TBD'],
+      [16, '2026-07-13', 'Frank',          '', '', '', 'TBD'],
+      [17, '2026-07-20', 'Giovanni',      '', '', '', 'TBD'],
+      [18, '2026-07-27', 'Guillaume',     '', '', '', 'TBD'],
+      [19, '2026-08-03', '',              '', '', '', 'Buffer'],
+      [20, '2026-08-10', 'Ivan',          '', '', '', 'TBD'],
+      [21, '2026-08-17', 'Jona',          '', '', '', 'TBD'],
+      [22, '2026-08-24', 'Matej',         '', '', '', 'TBD'],
+      [23, '2026-08-31', 'Pradyun',       '', '', '', 'TBD'],
+      [24, '2026-09-07', 'Stephen',       '', '', '', 'TBD'],
+      [25, '2026-09-14', 'Theresa',       '', '', '', 'TBD'],
+      [26, '2026-09-21', 'Vincent',       '', '', '', 'TBD'],
+      [27, '2026-09-28', 'Andreas',       '', '', '', 'TBD']
     ];
     schedSheet.getRange(2, 1, schedData.length, schedData[0].length).setValues(schedData);
   }
@@ -481,10 +678,24 @@ function _doSetup(forceReset) {
     logSheet.appendRow(['Timestamp', 'Action', 'Details']);
   }
 
+  // --- PollResponses tab ---
+  var pollSheet = _getOrCreateSheet(ss, 'PollResponses');
+  if (forceReset || pollSheet.getLastRow() <= 1) {
+    pollSheet.clearContents();
+    pollSheet.appendRow(['Timestamp', 'Name', 'UnavailableDates', 'PreferredDate']);
+  }
+
+  // --- Archive tab ---
+  var archiveSheet = _getOrCreateSheet(ss, 'Archive');
+  if (forceReset || archiveSheet.getLastRow() <= 1) {
+    archiveSheet.clearContents();
+    archiveSheet.appendRow(['Semester', 'Week', 'Date', 'Presenter', 'Type', 'Topic', 'Abstract', 'Status']);
+  }
+
   // Remove default Sheet1 if it exists and is empty
   var sheet1 = ss.getSheetByName('Sheet1');
   if (sheet1 && sheet1.getLastRow() <= 1) {
-    try { ss.deleteSheet(sheet1); } catch(e) { /* ignore if it's the only sheet */ }
+    try { ss.deleteSheet(sheet1); } catch(e) { /* ignore */ }
   }
 
   logAction(ss, 'setup', 'Sheets initialized' + (forceReset ? ' (reset)' : ''));

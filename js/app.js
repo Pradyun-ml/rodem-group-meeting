@@ -8,6 +8,8 @@ document.addEventListener('alpine:init', () => {
     credits: {},
     optOuts: [],
     indicoEvents: [],
+    archive: [],
+    pollResponses: [],
     loading: true,
     error: null,
     notification: null,
@@ -19,6 +21,9 @@ document.addEventListener('alpine:init', () => {
     showSwapModal: false,
     showRandomModal: false,
     showFairnessModal: false,
+    showPollModal: false,
+    showGenerateModal: false,
+    showArchive: false,
 
     // Volunteer form
     volName: '',
@@ -44,6 +49,19 @@ document.addEventListener('alpine:init', () => {
     randomResult: null,
     randomSubmitting: false,
 
+    // Poll form
+    pollName: '',
+    pollUnavailable: [],
+    pollPreferred: '',
+    pollSubmitting: false,
+
+    // Schedule generation
+    generatePreview: null,
+    generateSubmitting: false,
+
+    // Archive
+    selectedArchiveSemester: '',
+
     async init() {
       await this.loadData();
       this.loadIndicoEvents();
@@ -58,8 +76,9 @@ document.addEventListener('alpine:init', () => {
       if (data && data.schedule) {
         this.schedule = data.schedule;
         this.optOuts = data.optOuts || [];
+        this.archive = data.archive || [];
+        this.pollResponses = data.pollResponses || [];
         if (data.members) {
-          // Update credits from server
           const memberData = {};
           data.members.forEach(m => { memberData[m.name] = m.credits || 0; });
           this.credits = memberData;
@@ -67,10 +86,11 @@ document.addEventListener('alpine:init', () => {
           this.credits = Scheduler.computeCredits(this.schedule, this.members);
         }
       } else {
-        // Fallback to local defaults
-        this.schedule = JSON.parse(JSON.stringify(CONFIG.DEFAULT_SCHEDULE));
+        this.schedule = Scheduler.generateDefaultSchedule();
         this.credits = Scheduler.computeCredits(this.schedule, this.members);
         this.optOuts = [];
+        this.archive = [];
+        this.pollResponses = [];
       }
 
       this.loading = false;
@@ -80,7 +100,7 @@ document.addEventListener('alpine:init', () => {
       this.indicoEvents = await API.fetchIndicoEvents();
     },
 
-    // --- Computed properties ---
+    // ===== Computed properties =====
 
     get currentDate() {
       return Scheduler.currentOrNextDate(CONFIG.DATES);
@@ -100,16 +120,52 @@ document.addEventListener('alpine:init', () => {
       return Scheduler.upcomingDates(CONFIG.DATES);
     },
 
-    get emptySlots() {
+    // Upcoming non-holiday dates for volunteer form
+    get volunteerDates() {
       return this.schedule.filter(s =>
-        !Scheduler.isPast(s.date) &&
-        (!s.presenter || s.status === 'Empty')
+        !Scheduler.isPast(s.date) && s.status !== 'Holiday'
       );
     },
 
-    // --- Row styling ---
+    // Upcoming dates that are empty, buffer (unclaimed), or cancelled
+    get emptySlots() {
+      return this.schedule.filter(s =>
+        !Scheduler.isPast(s.date) &&
+        s.status !== 'Holiday' &&
+        (s.status === 'Empty' || s.status === 'Buffer' || s.status === 'Cancelled' ||
+         (!s.presenter && s.status !== 'Holiday'))
+      );
+    },
+
+    // Non-holiday, non-buffer upcoming dates for the poll
+    get pollAvailableDates() {
+      return CONFIG.DATES.filter(d =>
+        !Scheduler.isPast(d) && !Scheduler.isHoliday(d)
+      );
+    },
+
+    // Preferred dates: upcoming non-holiday dates not marked unavailable
+    get pollPreferredDates() {
+      return this.pollAvailableDates.filter(d => !this.pollUnavailable.includes(d));
+    },
+
+    // Archive semesters
+    get archiveSemesters() {
+      const semesters = [...new Set(this.archive.map(a => a.semester))];
+      return semesters.sort().reverse();
+    },
+
+    get archiveForSemester() {
+      if (!this.selectedArchiveSemester) return [];
+      return this.archive.filter(a => a.semester === this.selectedArchiveSemester);
+    },
+
+    // ===== Row styling =====
 
     rowClass(entry) {
+      if (entry.status === 'Holiday') return 'holiday-week';
+      if (entry.status === 'Buffer' && !entry.presenter) return 'buffer-week';
+      if (entry.status === 'Cancelled') return 'cancelled-week';
       if (entry.date === this.currentDate) return 'current-week';
       if (Scheduler.isPast(entry.date)) return 'past-week';
       return '';
@@ -121,15 +177,28 @@ document.addEventListener('alpine:init', () => {
         case 'Volunteered': return 'status-volunteered';
         case 'TBD': return 'status-tbd';
         case 'Empty': return 'status-empty';
+        case 'Holiday': return 'status-holiday';
+        case 'Buffer': return 'status-buffer';
+        case 'Cancelled': return 'status-cancelled';
         default: return 'status-tbd';
       }
     },
 
-    statusBadge(status) {
-      return status || 'TBD';
+    statusBadge(entry) {
+      if (entry.status === 'Holiday') return 'Holiday';
+      if (entry.status === 'Buffer' && !entry.presenter) return 'Buffer';
+      if (entry.status === 'Cancelled') return 'Cancelled';
+      return entry.status || 'TBD';
     },
 
-    // --- Date helpers ---
+    presenterDisplay(entry) {
+      if (entry.status === 'Holiday') return entry.presenter || 'No Meeting';
+      if (entry.status === 'Buffer' && !entry.presenter) return 'Buffer \u2014 Available';
+      if (entry.status === 'Cancelled') return 'Meeting Cancelled';
+      return entry.presenter || '\u2014';
+    },
+
+    // ===== Date helpers =====
 
     formatDate(d) { return Scheduler.formatDate(d); },
     formatDateLong(d) { return Scheduler.formatDateLong(d); },
@@ -150,7 +219,7 @@ document.addEventListener('alpine:init', () => {
       return null;
     },
 
-    // --- Volunteer form ---
+    // ===== Volunteer form =====
 
     openVolunteerModal() {
       this.volName = '';
@@ -171,12 +240,14 @@ document.addEventListener('alpine:init', () => {
       const res = await API.volunteer(this.volName, this.volDate, this.volType, this.volTopic, this.volAbstract);
 
       if (res.success) {
-        this.notify(`${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)}!`);
+        const msg = res.reversedCancellation
+          ? `${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)} \u2014 cancellation reversed!`
+          : `${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)}!`;
+        this.notify(msg);
         this.showVolunteerModal = false;
         await this.loadData();
       } else if (res.error) {
         this.notify(res.error, 'error');
-        // If backend not configured, apply locally
         if (res.error.includes('not configured')) {
           this.applyVolunteerLocally();
         }
@@ -187,8 +258,8 @@ document.addEventListener('alpine:init', () => {
     applyVolunteerLocally() {
       const entry = this.schedule.find(s => s.date === this.volDate);
       if (!entry) return;
-      if (entry.presenter && entry.status !== 'Empty') {
-        // Add as additional presenter
+      const wasCancelled = entry.status === 'Cancelled';
+      if (entry.presenter && entry.status !== 'Empty' && entry.status !== 'Cancelled' && entry.status !== 'Buffer') {
         entry.presenter += ` & ${this.volName}`;
       } else {
         entry.presenter = this.volName;
@@ -198,10 +269,11 @@ document.addEventListener('alpine:init', () => {
       entry.abstract = this.volAbstract;
       entry.status = 'Volunteered';
       this.showVolunteerModal = false;
-      this.notify(`${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)} (local only).`);
+      const extra = wasCancelled ? ' (cancellation reversed, local only)' : ' (local only)';
+      this.notify(`${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)}${extra}.`);
     },
 
-    // --- Opt-out form ---
+    // ===== Opt-out form =====
 
     openOptOutModal() {
       this.optOutName = '';
@@ -214,8 +286,22 @@ document.addEventListener('alpine:init', () => {
       if (!this.optOutName) return [];
       return this.schedule.filter(s =>
         !Scheduler.isPast(s.date) &&
+        s.status !== 'Holiday' && s.status !== 'Buffer' &&
         Scheduler.parsePresenters(s.presenter).includes(this.optOutName)
       );
+    },
+
+    optOutDeadlinePassed(dateStr) {
+      return !Scheduler.canOptOut(dateStr);
+    },
+
+    get optOutDeadlineMessage() {
+      if (!this.optOutDate) return '';
+      if (this.optOutDeadlinePassed(this.optOutDate)) {
+        return 'The deadline has passed \u2014 please try to find someone to swap with, or contact Pradyun directly.';
+      }
+      const days = Scheduler.daysUntil(this.optOutDate);
+      return `${days} days until this meeting. Deadline: ${CONFIG.OPT_OUT_DEADLINE_DAYS} days before (Tuesday of the prior week).`;
     },
 
     async submitOptOut() {
@@ -223,12 +309,20 @@ document.addEventListener('alpine:init', () => {
         this.notify('Please select your name and date.', 'error');
         return;
       }
+      if (this.optOutDeadlinePassed(this.optOutDate)) {
+        this.notify('Opt-out deadline has passed. Try swapping instead, or contact Pradyun.', 'error');
+        return;
+      }
       this.optOutSubmitting = true;
 
       const res = await API.optOut(this.optOutName, this.optOutDate, this.optOutReason);
 
       if (res.success) {
-        this.notify(`${this.optOutName} opted out of ${Scheduler.formatDate(this.optOutDate)}.`);
+        let msg = `${this.optOutName} opted out of ${Scheduler.formatDate(this.optOutDate)}.`;
+        if (res.movedToBuffer) {
+          msg += ` Moved to buffer week: ${Scheduler.formatDate(res.movedToBuffer)}.`;
+        }
+        this.notify(msg);
         this.showOptOutModal = false;
         await this.loadData();
       } else if (res.error) {
@@ -245,18 +339,30 @@ document.addEventListener('alpine:init', () => {
       if (!entry) return;
       const presenters = Scheduler.parsePresenters(entry.presenter)
         .filter(p => p !== this.optOutName);
+
+      // Try to move to buffer
+      const buffer = Scheduler.findNextBuffer(this.schedule, this.optOutDate);
+      let bufferMsg = '';
+
       if (presenters.length > 0) {
         entry.presenter = presenters.join(' & ');
       } else {
         entry.presenter = '';
         entry.status = 'Empty';
       }
+
+      if (buffer) {
+        buffer.presenter = this.optOutName;
+        buffer.status = 'TBD';
+        bufferMsg = ` Moved to buffer week: ${Scheduler.formatDate(buffer.date)}.`;
+      }
+
       this.optOuts.push({ name: this.optOutName, date: this.optOutDate, reason: this.optOutReason });
       this.showOptOutModal = false;
-      this.notify(`${this.optOutName} opted out of ${Scheduler.formatDate(this.optOutDate)} (local only).`);
+      this.notify(`${this.optOutName} opted out of ${Scheduler.formatDate(this.optOutDate)}${bufferMsg} (local only).`);
     },
 
-    // --- Swap form ---
+    // ===== Swap form (no deadline — available anytime) =====
 
     openSwapModal() {
       this.swapMember1 = '';
@@ -268,6 +374,7 @@ document.addEventListener('alpine:init', () => {
       if (!name) return [];
       return this.schedule.filter(s =>
         !Scheduler.isPast(s.date) &&
+        s.status !== 'Holiday' && s.status !== 'Buffer' &&
         Scheduler.parsePresenters(s.presenter).includes(name)
       );
     },
@@ -300,14 +407,13 @@ document.addEventListener('alpine:init', () => {
       }
       this.swapSubmitting = true;
 
-      // Swap the first upcoming date of each member
       const date1 = d1[0].date;
       const date2 = d2[0].date;
 
       const res = await API.swap(this.swapMember1, date1, this.swapMember2, date2);
 
       if (res.success) {
-        this.notify(`Swapped: ${this.swapMember1} ↔ ${this.swapMember2}`);
+        this.notify(`Swapped: ${this.swapMember1} \u2194 ${this.swapMember2}`);
         this.showSwapModal = false;
         await this.loadData();
       } else if (res.error) {
@@ -324,7 +430,6 @@ document.addEventListener('alpine:init', () => {
       const entry2 = this.schedule.find(s => s.date === date2);
       if (!entry1 || !entry2) return;
 
-      // Swap presenters for these two entries
       const replacePres = (entry, oldName, newName) => {
         const parts = Scheduler.parsePresenters(entry.presenter);
         const idx = parts.indexOf(oldName);
@@ -336,10 +441,10 @@ document.addEventListener('alpine:init', () => {
       replacePres(entry2, this.swapMember2, this.swapMember1);
 
       this.showSwapModal = false;
-      this.notify(`Swapped: ${this.swapMember1} ↔ ${this.swapMember2} (local only).`);
+      this.notify(`Swapped: ${this.swapMember1} \u2194 ${this.swapMember2} (local only).`);
     },
 
-    // --- Random assignment ---
+    // ===== Random assignment =====
 
     openRandomModal() {
       this.randomDate = '';
@@ -384,7 +489,7 @@ document.addEventListener('alpine:init', () => {
     applyRandomLocally() {
       const entry = this.schedule.find(s => s.date === this.randomDate);
       if (!entry) return;
-      if (entry.presenter && entry.status !== 'Empty') {
+      if (entry.presenter && entry.status !== 'Empty' && entry.status !== 'Buffer' && entry.status !== 'Cancelled') {
         entry.presenter += ` & ${this.randomResult}`;
       } else {
         entry.presenter = this.randomResult;
@@ -394,7 +499,7 @@ document.addEventListener('alpine:init', () => {
       this.notify(`${this.randomResult} assigned to ${Scheduler.formatDate(this.randomDate)} (local only).`);
     },
 
-    // --- Fairness tracker ---
+    // ===== Fairness tracker =====
 
     openFairnessModal() {
       this.credits = Scheduler.computeCredits(this.schedule, this.members);
@@ -417,22 +522,91 @@ document.addEventListener('alpine:init', () => {
       return 'var(--pico-color-red-500, #ef4444)';
     },
 
-    // --- Notifications ---
+    // ===== Poll form =====
+
+    openPollModal() {
+      this.pollName = '';
+      this.pollUnavailable = [];
+      this.pollPreferred = '';
+      this.showPollModal = true;
+    },
+
+    async submitPoll() {
+      if (!this.pollName) {
+        this.notify('Please select your name.', 'error');
+        return;
+      }
+      this.pollSubmitting = true;
+
+      const unavailStr = this.pollUnavailable.join(',');
+      const res = await API.submitPoll(this.pollName, unavailStr, this.pollPreferred);
+
+      if (res.success) {
+        this.notify(`Availability submitted for ${this.pollName}!`);
+        this.showPollModal = false;
+        await this.loadData();
+      } else if (res.error) {
+        this.notify(res.error, 'error');
+        if (res.error.includes('not configured')) {
+          this.pollResponses.push({
+            timestamp: new Date().toISOString(),
+            name: this.pollName,
+            unavailableDates: unavailStr,
+            preferredDate: this.pollPreferred
+          });
+          this.showPollModal = false;
+          this.notify(`Availability saved for ${this.pollName} (local only).`);
+        }
+      }
+      this.pollSubmitting = false;
+    },
+
+    // ===== Schedule generation (organizer) =====
+
+    openGenerateModal() {
+      this.generatePreview = null;
+      this.showGenerateModal = true;
+    },
+
+    generatePreviewSchedule() {
+      const preview = Scheduler.generateSchedule(
+        CONFIG.DATES,
+        this.members,
+        CONFIG.HOLIDAYS,
+        CONFIG.BUFFER_WEEKS,
+        this.pollResponses,
+        this.credits
+      );
+      this.generatePreview = preview;
+    },
+
+    async confirmGenerate() {
+      if (!this.generatePreview) return;
+      this.generateSubmitting = true;
+
+      const res = await API.archiveAndSave(CONFIG.SEMESTER.label, this.generatePreview);
+
+      if (res.success) {
+        this.notify('New schedule saved! Previous schedule archived.');
+        this.showGenerateModal = false;
+        await this.loadData();
+      } else if (res.error) {
+        this.notify(res.error, 'error');
+        if (res.error.includes('not configured')) {
+          this.schedule = this.generatePreview;
+          this.showGenerateModal = false;
+          this.notify('Schedule updated (local only).');
+        }
+      }
+      this.generateSubmitting = false;
+    },
+
+    // ===== Notifications =====
 
     notify(message, type = 'success') {
       this.notification = message;
       this.notificationType = type;
       setTimeout(() => { this.notification = null; }, 5000);
-    },
-
-    // --- Utility ---
-
-    closeAllModals() {
-      this.showVolunteerModal = false;
-      this.showOptOutModal = false;
-      this.showSwapModal = false;
-      this.showRandomModal = false;
-      this.showFairnessModal = false;
     }
   }));
 });

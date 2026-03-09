@@ -5,7 +5,13 @@
   --status-volunteered: #3b82f6;
   --status-tbd: #f59e0b;
   --status-empty: #ef4444;
+  --status-holiday: #9ca3af;
+  --status-buffer: #8b5cf6;
+  --status-cancelled: #f97316;
   --current-week-bg: #fef3c7;
+  --holiday-week-bg: #f3f4f6;
+  --buffer-week-bg: #f5f3ff;
+  --cancelled-week-bg: #fff7ed;
   --past-week-opacity: 0.55;
   --bar-bg: #e2e8f0;
 }
@@ -13,6 +19,9 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --current-week-bg: #422006;
+    --holiday-week-bg: #1f2937;
+    --buffer-week-bg: #1e1b4b;
+    --cancelled-week-bg: #431407;
     --bar-bg: #334155;
   }
 }
@@ -95,10 +104,24 @@ header p {
 }
 
 .current-week td:first-child::before {
-  content: '▶';
+  content: '\25B6';
   position: absolute;
   left: 0.15rem;
   font-size: 0.7rem;
+}
+
+.holiday-week {
+  background: var(--holiday-week-bg);
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.buffer-week {
+  background: var(--buffer-week-bg);
+}
+
+.cancelled-week {
+  background: var(--cancelled-week-bg);
 }
 
 /* Status badges */
@@ -129,6 +152,21 @@ header p {
 
 .status-empty {
   background: var(--status-empty);
+  color: #fff;
+}
+
+.status-holiday {
+  background: var(--status-holiday);
+  color: #fff;
+}
+
+.status-buffer {
+  background: var(--status-buffer);
+  color: #fff;
+}
+
+.status-cancelled {
+  background: var(--status-cancelled);
   color: #fff;
 }
 
@@ -296,6 +334,105 @@ header p {
   font-size: 0.9rem;
 }
 
+/* Poll form — date checklist */
+.poll-date-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0;
+}
+
+.poll-date-list label {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  margin: 0;
+}
+
+.poll-date-list input[type="checkbox"] {
+  margin: 0;
+  width: auto;
+}
+
+/* Deadline notice */
+.deadline-notice {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.35rem;
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+  border-left: 3px solid;
+}
+
+.deadline-notice.info {
+  border-color: var(--status-volunteered);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.deadline-notice.warning {
+  border-color: var(--status-tbd);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.deadline-notice.error {
+  border-color: var(--status-empty);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* Archive section */
+.archive-section {
+  margin-top: 2rem;
+  border-top: 1px solid var(--pico-muted-border-color, #e2e8f0);
+  padding-top: 1rem;
+}
+
+.archive-section summary {
+  cursor: pointer;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.archive-section .schedule-table {
+  opacity: 0.8;
+}
+
+/* Generate preview */
+.generate-preview {
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 1rem 0;
+}
+
+.generate-preview table {
+  font-size: 0.8rem;
+}
+
+/* Organizer tools section */
+.organizer-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--pico-muted-border-color, #e2e8f0);
+}
+
+.organizer-section summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+
+.organizer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.organizer-actions button {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .schedule-table {
@@ -307,7 +444,6 @@ header p {
     padding: 0.35rem 0.4rem;
   }
 
-  /* Hide abstract and type columns on mobile */
   .schedule-table th:nth-child(4),
   .schedule-table td:nth-child(4),
   .schedule-table th:nth-child(5),
@@ -327,6 +463,10 @@ header p {
     flex-direction: column;
     text-align: center;
   }
+
+  .poll-date-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Loading spinner */
@@ -334,13 +474,6 @@ header p {
   text-align: center;
   padding: 3rem;
   opacity: 0.6;
-}
-
-/* Empty state */
-.empty-state {
-  text-align: center;
-  padding: 2rem;
-  opacity: 0.5;
 }
 
 /* Week number cell */

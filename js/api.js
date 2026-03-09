@@ -2,7 +2,7 @@
 
 const API = {
   /**
-   * GET schedule + members + opt-outs from Apps Script
+   * GET schedule + members + opt-outs + archive + poll responses from Apps Script
    */
   async fetchAll() {
     if (!CONFIG.APPS_SCRIPT_URL) {
@@ -21,8 +21,8 @@ const API = {
   },
 
   /**
-   * POST an action to Apps Script
-   * Content-Type: text/plain to avoid CORS preflight
+   * POST an action to Apps Script.
+   * Content-Type: text/plain to avoid CORS preflight.
    */
   async post(action, payload) {
     if (!CONFIG.APPS_SCRIPT_URL) {
@@ -71,6 +71,14 @@ const API = {
     return this.post('updateCredits', { credits });
   },
 
+  async submitPoll(name, unavailableDates, preferredDate) {
+    return this.post('submitPoll', { name, unavailableDates, preferredDate });
+  },
+
+  async archiveAndSave(semesterLabel, newSchedule) {
+    return this.post('archiveAndSave', { semesterLabel, newSchedule });
+  },
+
   // --- Indico integration (optional) ---
 
   fetchIndicoEvents() {
@@ -102,7 +110,6 @@ const API = {
       script.src = `https://indico.cern.ch/export/categ/${catId}.jsonp?from=today&to=+90d&jsonp=${callbackName}`;
       document.head.appendChild(script);
 
-      // Timeout after 10 seconds
       setTimeout(() => {
         if (window[callbackName]) {
           cleanup();

@@ -17,10 +17,10 @@
   <!-- Header -->
   <header>
     <h1>Group Meeting Schedule</h1>
-    <p>Every Monday, 3:00 PM CET &mdash; Spring 2026</p>
+    <p>Every Monday, 3:00 PM CET &mdash; <span x-text="''+CONFIG.SEMESTER.label"></span></p>
   </header>
 
-  <!-- Fairness summary bar (click to expand) -->
+  <!-- Fairness summary bar -->
   <div class="fairness-summary" @click="openFairnessModal()"
        :style="'border: 2px solid ' + fairnessColor()">
     <div>
@@ -36,6 +36,7 @@
     <button class="outline secondary" @click="openOptOutModal()">I Can't Present</button>
     <button class="outline contrast" @click="openSwapModal()">Swap Dates</button>
     <button class="outline" @click="openRandomModal()" style="border-color: var(--status-tbd); color: var(--status-tbd);">Assign Random Speaker</button>
+    <button class="outline" @click="openPollModal()" style="border-color: var(--status-buffer); color: var(--status-buffer);">Semester Poll</button>
   </div>
 
   <!-- Loading state -->
@@ -71,13 +72,15 @@
               </template>
             </td>
             <td>
-              <span class="presenter-name" x-text="entry.presenter || '—'"></span>
+              <span class="presenter-name" x-text="presenterDisplay(entry)"></span>
             </td>
-            <td x-text="entry.type || '—'"></td>
-            <td class="topic-cell" :title="entry.topic" x-text="entry.topic || '—'"></td>
+            <td x-text="entry.status === 'Holiday' || (entry.status === 'Buffer' && !entry.presenter) ? '' : (entry.type || '\u2014')"></td>
+            <td class="topic-cell"
+                :title="entry.topic"
+                x-text="entry.status === 'Holiday' || (entry.status === 'Buffer' && !entry.presenter) ? '' : (entry.topic || '\u2014')"></td>
             <td>
               <span class="status-badge" :class="statusClass(entry.status)"
-                    x-text="statusBadge(entry.status)"></span>
+                    x-text="statusBadge(entry)"></span>
             </td>
           </tr>
         </template>
@@ -85,12 +88,75 @@
     </table>
   </div>
 
+  <!-- Organizer tools -->
+  <div class="organizer-section" x-show="!loading">
+    <details>
+      <summary>Organizer Tools</summary>
+      <div class="organizer-actions">
+        <button class="outline secondary" @click="openGenerateModal()">Generate Schedule from Poll</button>
+      </div>
+      <template x-if="pollResponses.length > 0">
+        <p style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.7;">
+          <span x-text="pollResponses.length"></span> poll response(s) received.
+        </p>
+      </template>
+    </details>
+  </div>
+
+  <!-- Archive section -->
+  <div class="archive-section" x-show="!loading && archiveSemesters.length > 0">
+    <details x-model="showArchive">
+      <summary>Past Schedules</summary>
+      <label style="max-width: 300px; margin-top: 0.75rem;">
+        Semester
+        <select x-model="selectedArchiveSemester">
+          <option value="">Select semester&hellip;</option>
+          <template x-for="sem in archiveSemesters" :key="sem">
+            <option :value="sem" x-text="sem"></option>
+          </template>
+        </select>
+      </label>
+      <template x-if="archiveForSemester.length > 0">
+        <div style="overflow-x: auto;">
+          <table class="schedule-table">
+            <thead>
+              <tr>
+                <th>Wk</th>
+                <th>Date</th>
+                <th>Presenter(s)</th>
+                <th>Type</th>
+                <th>Topic</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="entry in archiveForSemester" :key="entry.date">
+                <tr :class="entry.status === 'Holiday' ? 'holiday-week' : (entry.status === 'Buffer' ? 'buffer-week' : '')">
+                  <td><span class="week-num" x-text="entry.week"></span></td>
+                  <td x-text="formatDate(entry.date)"></td>
+                  <td x-text="entry.presenter || '\u2014'"></td>
+                  <td x-text="entry.type || '\u2014'"></td>
+                  <td class="topic-cell" x-text="entry.topic || '\u2014'"></td>
+                  <td>
+                    <span class="status-badge" :class="statusClass(entry.status)"
+                          x-text="entry.status || 'TBD'"></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </details>
+  </div>
+
   <!-- ========== MODALS ========== -->
 
-  <!-- Volunteer Modal -->
+  <!-- Volunteer Modal (NO deadline — always open) -->
   <div class="modal-backdrop" x-show="showVolunteerModal" x-transition @click.self="showVolunteerModal = false" @keydown.escape.window="showVolunteerModal = false">
     <div class="modal-content" @click.stop>
       <h3>I Want to Present</h3>
+      <div class="deadline-notice info">Volunteering has no deadline &mdash; you can sign up anytime, even last-minute.</div>
       <label>Name
         <select x-model="volName">
           <option value="">Select your name&hellip;</option>
@@ -102,8 +168,8 @@
       <label>Preferred Date
         <select x-model="volDate">
           <option value="">Select a date&hellip;</option>
-          <template x-for="d in upcomingDates" :key="d">
-            <option :value="d" x-text="formatDateLong(d)"></option>
+          <template x-for="entry in volunteerDates" :key="entry.date">
+            <option :value="entry.date" x-text="formatDateLong(entry.date) + (entry.status === 'Buffer' ? ' (Buffer)' : entry.status === 'Cancelled' ? ' (Cancelled)' : '')"></option>
           </template>
         </select>
       </label>
@@ -128,10 +194,11 @@
     </div>
   </div>
 
-  <!-- Opt-Out Modal -->
+  <!-- Opt-Out Modal (6-day deadline) -->
   <div class="modal-backdrop" x-show="showOptOutModal" x-transition @click.self="showOptOutModal = false" @keydown.escape.window="showOptOutModal = false">
     <div class="modal-content" @click.stop>
       <h3>I Can't Present</h3>
+      <div class="deadline-notice warning">Opt-out deadline: 6 days before your presentation (Tuesday of the previous week).</div>
       <label>Name
         <select x-model="optOutName">
           <option value="">Select your name&hellip;</option>
@@ -144,27 +211,38 @@
         <select x-model="optOutDate">
           <option value="">Select the date&hellip;</option>
           <template x-for="entry in optOutDatesForMember" :key="entry.date">
-            <option :value="entry.date" x-text="formatDateLong(entry.date)"></option>
+            <option :value="entry.date"
+                    :disabled="optOutDeadlinePassed(entry.date)"
+                    x-text="formatDateLong(entry.date) + (optOutDeadlinePassed(entry.date) ? ' (deadline passed)' : '')"></option>
           </template>
         </select>
       </label>
       <template x-if="optOutName && optOutDatesForMember.length === 0">
         <p><small>No upcoming dates assigned to this member.</small></p>
       </template>
+      <template x-if="optOutDate && optOutDeadlinePassed(optOutDate)">
+        <div class="deadline-notice error" x-text="optOutDeadlineMessage"></div>
+      </template>
+      <template x-if="optOutDate && !optOutDeadlinePassed(optOutDate)">
+        <div class="deadline-notice info" x-text="optOutDeadlineMessage"></div>
+      </template>
       <label>Reason <small>(optional)</small>
         <input type="text" x-model="optOutReason" placeholder="e.g. conference travel">
       </label>
       <div class="modal-actions">
         <button class="secondary outline" @click="showOptOutModal = false">Cancel</button>
-        <button @click="submitOptOut()" :aria-busy="optOutSubmitting" :disabled="optOutSubmitting">Submit</button>
+        <button @click="submitOptOut()"
+                :aria-busy="optOutSubmitting"
+                :disabled="optOutSubmitting || !optOutDate || optOutDeadlinePassed(optOutDate)">Submit</button>
       </div>
     </div>
   </div>
 
-  <!-- Swap Modal -->
+  <!-- Swap Modal (no deadline — anytime) -->
   <div class="modal-backdrop" x-show="showSwapModal" x-transition @click.self="showSwapModal = false" @keydown.escape.window="showSwapModal = false">
     <div class="modal-content" @click.stop>
       <h3>Swap Dates</h3>
+      <div class="deadline-notice info">Swaps are available anytime &mdash; even last-minute for emergencies.</div>
       <label>Member 1
         <select x-model="swapMember1">
           <option value="">Select first member&hellip;</option>
@@ -205,17 +283,14 @@
   <div class="modal-backdrop" x-show="showRandomModal" x-transition @click.self="showRandomModal = false" @keydown.escape.window="showRandomModal = false">
     <div class="modal-content" @click.stop>
       <h3>Assign Random Speaker</h3>
-      <label>Date (empty/TBD slots)
+      <label>Date (empty/buffer/cancelled slots)
         <select x-model="randomDate" @change="randomResult = null">
           <option value="">Select a date&hellip;</option>
           <template x-for="entry in emptySlots" :key="entry.date">
-            <option :value="entry.date" x-text="formatDateLong(entry.date) + (entry.presenter ? ' (has: ' + entry.presenter + ')' : '')"></option>
+            <option :value="entry.date" x-text="formatDateLong(entry.date) + ' (' + entry.status + ')'"></option>
           </template>
         </select>
       </label>
-      <template x-if="randomDate && emptySlots.length === 0">
-        <p><small>No empty slots available.</small></p>
-      </template>
       <template x-if="!randomResult">
         <div class="modal-actions">
           <button class="secondary outline" @click="showRandomModal = false">Cancel</button>
@@ -268,9 +343,111 @@
     </div>
   </div>
 
+  <!-- Poll Modal -->
+  <div class="modal-backdrop" x-show="showPollModal" x-transition @click.self="showPollModal = false" @keydown.escape.window="showPollModal = false">
+    <div class="modal-content" @click.stop style="max-width: 540px;">
+      <h3>Semester Availability Poll</h3>
+      <p><small>Submit your availability for the current semester. The organizer will use this to generate the schedule.</small></p>
+
+      <label>Name
+        <select x-model="pollName">
+          <option value="">Select your name&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+
+      <p style="margin-bottom: 0.25rem; font-weight: 500;">Which dates are you NOT available?</p>
+      <div class="poll-date-list">
+        <template x-for="d in pollAvailableDates" :key="d">
+          <label>
+            <input type="checkbox" :value="d" x-model="pollUnavailable">
+            <span x-text="formatDate(d)"></span>
+          </label>
+        </template>
+      </div>
+
+      <label style="margin-top: 0.75rem;">Preferred date to present <small>(optional)</small>
+        <select x-model="pollPreferred">
+          <option value="">No preference</option>
+          <template x-for="d in pollPreferredDates" :key="d">
+            <option :value="d" x-text="formatDateLong(d)"></option>
+          </template>
+        </select>
+      </label>
+
+      <div class="modal-actions">
+        <button class="secondary outline" @click="showPollModal = false">Cancel</button>
+        <button @click="submitPoll()" :aria-busy="pollSubmitting" :disabled="pollSubmitting">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate Schedule Modal (organizer) -->
+  <div class="modal-backdrop" x-show="showGenerateModal" x-transition @click.self="showGenerateModal = false" @keydown.escape.window="showGenerateModal = false">
+    <div class="modal-content" @click.stop style="max-width: 640px;">
+      <h3>Generate Schedule from Poll</h3>
+
+      <template x-if="pollResponses.length === 0">
+        <p>No poll responses received yet. Ask members to fill out the Semester Poll first.</p>
+      </template>
+
+      <template x-if="pollResponses.length > 0 && !generatePreview">
+        <div>
+          <p><strong x-text="pollResponses.length + ' poll response(s):'"></strong></p>
+          <ul style="font-size: 0.85rem;">
+            <template x-for="r in pollResponses" :key="r.name + r.timestamp">
+              <li>
+                <strong x-text="r.name"></strong>
+                <template x-if="r.unavailableDates">
+                  <span> &mdash; unavailable: <span x-text="r.unavailableDates"></span></span>
+                </template>
+                <template x-if="r.preferredDate">
+                  <span> &mdash; prefers: <span x-text="formatDate(r.preferredDate)"></span></span>
+                </template>
+              </li>
+            </template>
+          </ul>
+          <div class="modal-actions">
+            <button class="secondary outline" @click="showGenerateModal = false">Cancel</button>
+            <button @click="generatePreviewSchedule()">Generate Preview</button>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="generatePreview">
+        <div>
+          <p><strong>Preview:</strong></p>
+          <div class="generate-preview">
+            <table class="schedule-table">
+              <thead>
+                <tr><th>Wk</th><th>Date</th><th>Presenter</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                <template x-for="entry in generatePreview" :key="entry.date">
+                  <tr :class="entry.status === 'Holiday' ? 'holiday-week' : (entry.status === 'Buffer' ? 'buffer-week' : '')">
+                    <td><span class="week-num" x-text="entry.week"></span></td>
+                    <td x-text="formatDate(entry.date)"></td>
+                    <td x-text="entry.presenter || '\u2014'"></td>
+                    <td><span class="status-badge" :class="statusClass(entry.status)" x-text="entry.status"></span></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary outline" @click="generatePreview = null">Re-generate</button>
+            <button @click="confirmGenerate()" :aria-busy="generateSubmitting" :disabled="generateSubmitting">Save &amp; Archive Current</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
   <!-- Footer -->
   <footer style="text-align: center; margin-top: 2rem; padding: 1rem; opacity: 0.5; font-size: 0.8rem;">
-    <p>Organized by Pradyun &mdash; <span x-text="members.length"></span> members, <span x-text="schedule.length"></span> weeks</p>
+    <p>Organized by Pradyun &mdash; <span x-text="members.length"></span> members, <span x-text="schedule.filter(s => s.status !== 'Holiday' && s.status !== 'Buffer').length"></span> presentation weeks</p>
   </footer>
 
   <!-- Scripts -->
@@ -280,7 +457,6 @@
   <script src="js/app.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
   <script>
-    // Alpine store for presentation types (used in templates)
     document.addEventListener('alpine:init', () => {
       Alpine.store('types', CONFIG.PRESENTATION_TYPES);
     });

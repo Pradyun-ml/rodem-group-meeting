@@ -91,6 +91,9 @@ function doPost(e) {
       case 'updateCredits':
         result = handleUpdateCredits(body);
         break;
+      case 'emergencyCancel':
+        result = handleEmergencyCancel(body);
+        break;
       case 'submitPoll':
         result = handleSubmitPoll(body);
         break;
@@ -205,12 +208,25 @@ function handleOptOut(body) {
     movedToBuffer = moveToNextBuffer(ss, sheet, data, headers, targetDate, body.name);
   }
 
+  // Auto-assign a random replacement speaker
+  var autoAssigned = null;
+  if (remaining.length === 0) {
+    var picked = pickRandomSpeakerForDate(ss, data, headers, targetDate, [body.name]);
+    if (picked) {
+      sheet.getRange(rowIndex, presCol + 1).setValue(picked);
+      sheet.getRange(rowIndex, statusCol + 1).setValue('TBD');
+      autoAssigned = picked;
+      logAction(ss, 'autoAssignRandom', picked + ' auto-assigned to ' + targetDate + ' (replacing ' + body.name + ')');
+    }
+  }
+
   var logMsg = body.name + ' opted out of ' + targetDate;
   if (body.reason) logMsg += ': ' + body.reason;
   if (movedToBuffer) logMsg += ' (moved to buffer: ' + movedToBuffer + ')';
+  if (autoAssigned) logMsg += ' (auto-assigned: ' + autoAssigned + ')';
   logAction(ss, 'optOut', logMsg);
 
-  return { success: true, movedToBuffer: movedToBuffer };
+  return { success: true, movedToBuffer: movedToBuffer, autoAssigned: autoAssigned };
 }
 
 /**
@@ -236,6 +252,51 @@ function moveToNextBuffer(ss, sheet, data, headers, afterDate, memberName) {
     }
   }
   return null;
+}
+
+function handleEmergencyCancel(body) {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Schedule');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var dateCol = headers.indexOf('Date');
+  var presCol = headers.indexOf('Presenter');
+  var statusCol = headers.indexOf('Status');
+
+  var targetDate = body.date;
+
+  var rowIndex = findRowByDate(data, dateCol, targetDate);
+  if (rowIndex === -1) {
+    return { success: false, error: 'Date not found in schedule: ' + targetDate };
+  }
+
+  var currentPresenter = (data[rowIndex - 1][presCol] || '').toString();
+  var presenters = currentPresenter.split(/[,&]/).map(function(s) { return s.trim(); }).filter(Boolean);
+  var remaining = presenters.filter(function(p) { return p !== body.name; });
+
+  if (remaining.length > 0) {
+    sheet.getRange(rowIndex, presCol + 1).setValue(remaining.join(' & '));
+  } else {
+    sheet.getRange(rowIndex, presCol + 1).setValue('');
+    sheet.getRange(rowIndex, statusCol + 1).setValue('Cancelled');
+  }
+
+  // Log in OptOuts tab
+  var optOutSheet = ss.getSheetByName('OptOuts');
+  optOutSheet.appendRow([new Date(), body.name, targetDate, '(emergency) ' + (body.reason || '')]);
+
+  // Try to move the member to the next available buffer week
+  var movedToBuffer = null;
+  if (remaining.length === 0) {
+    movedToBuffer = moveToNextBuffer(ss, sheet, data, headers, targetDate, body.name);
+  }
+
+  var logMsg = body.name + ' emergency-cancelled ' + targetDate;
+  if (body.reason) logMsg += ': ' + body.reason;
+  if (movedToBuffer) logMsg += ' (moved to buffer: ' + movedToBuffer + ')';
+  logAction(ss, 'emergencyCancel', logMsg);
+
+  return { success: true, movedToBuffer: movedToBuffer };
 }
 
 function handleSwap(body) {
@@ -576,6 +637,85 @@ function replaceMemberInList(presenterStr, oldName, newName) {
     parts[idx] = newName;
   }
   return parts.join(' & ');
+}
+
+/**
+ * Pick a random speaker for a date, weighted by credits.
+ * Excludes opt-outs, recent presenters, and explicitly excluded names.
+ */
+function pickRandomSpeakerForDate(ss, scheduleData, headers, targetDate, excludeNames) {
+  var membSheet = ss.getSheetByName('Members');
+  var membData = membSheet.getDataRange().getValues();
+  var membHeaders = membData[0];
+  var mNameCol = membHeaders.indexOf('Name');
+  var mCreditsCol = membHeaders.indexOf('Credits');
+  var mActiveCol = membHeaders.indexOf('Active');
+
+  var members = [];
+  var credits = {};
+  for (var i = 1; i < membData.length; i++) {
+    var name = (membData[i][mNameCol] || '').toString();
+    var active = (membData[i][mActiveCol] || '').toString();
+    if (name && active === 'Yes') {
+      members.push(name);
+      credits[name] = Number(membData[i][mCreditsCol]) || 0;
+    }
+  }
+
+  // Read opt-outs for this date
+  var optSheet = ss.getSheetByName('OptOuts');
+  var optData = optSheet.getDataRange().getValues();
+  var optedOut = [];
+  for (var i = 1; i < optData.length; i++) {
+    var optDate = formatSheetDate(optData[i][2]);
+    if (optDate === targetDate) {
+      optedOut.push((optData[i][1] || '').toString());
+    }
+  }
+
+  // Find recent presenters (2 weeks back)
+  var dateCol = headers.indexOf('Date');
+  var presCol = headers.indexOf('Presenter');
+  var statusCol = headers.indexOf('Status');
+
+  var dateIndex = -1;
+  for (var i = 1; i < scheduleData.length; i++) {
+    if (formatSheetDate(scheduleData[i][dateCol]) === targetDate) {
+      dateIndex = i;
+      break;
+    }
+  }
+
+  var recentPresenters = [];
+  if (dateIndex > 0) {
+    for (var i = Math.max(1, dateIndex - 2); i < dateIndex; i++) {
+      var st = (scheduleData[i][statusCol] || '').toString();
+      if (st !== 'Holiday' && st !== 'Buffer') {
+        var pres = (scheduleData[i][presCol] || '').toString();
+        var parts = pres.split(/[,&]/).map(function(s) { return s.trim(); }).filter(Boolean);
+        recentPresenters = recentPresenters.concat(parts);
+      }
+    }
+  }
+
+  // Build eligible list
+  var allExcluded = (excludeNames || []).concat(optedOut).concat(recentPresenters);
+  var eligible = members.filter(function(m) {
+    return allExcluded.indexOf(m) === -1;
+  });
+
+  if (eligible.length === 0) return null;
+
+  // Weighted random pick
+  var weights = eligible.map(function(m) { return Math.max(1, credits[m] || 0); });
+  var totalWeight = weights.reduce(function(a, b) { return a + b; }, 0);
+
+  var rand = Math.random() * totalWeight;
+  for (var i = 0; i < eligible.length; i++) {
+    rand -= weights[i];
+    if (rand <= 0) return eligible[i];
+  }
+  return eligible[eligible.length - 1];
 }
 
 /**

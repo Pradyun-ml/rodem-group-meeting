@@ -381,6 +381,20 @@ header p {
 }
 
 /* Archive section */
+/* Emergency cancel link */
+.emergency-cancel-link {
+  font-size: 0.8rem;
+  opacity: 0.5;
+  color: var(--status-cancelled);
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.emergency-cancel-link:hover {
+  opacity: 0.9;
+  text-decoration: underline;
+}
+
 .archive-section {
   margin-top: 2rem;
   border-top: 1px solid var(--pico-muted-border-color, #e2e8f0);

@@ -88,6 +88,11 @@
     </table>
   </div>
 
+  <!-- Emergency cancel (subtle, at the bottom of the schedule) -->
+  <div x-show="!loading" style="text-align: center; margin: 0.5rem 0 1.5rem;">
+    <a href="#" @click.prevent="openEmergencyCancelModal()" class="emergency-cancel-link">Emergency Cancel (last-minute)</a>
+  </div>
+
   <!-- Organizer tools -->
   <div class="organizer-section" x-show="!loading">
     <details>
@@ -442,6 +447,42 @@
           </div>
         </div>
       </template>
+    </div>
+  </div>
+
+  <!-- Emergency Cancel Modal (no deadline) -->
+  <div class="modal-backdrop" x-show="showEmergencyCancelModal" x-transition @click.self="showEmergencyCancelModal = false" @keydown.escape.window="showEmergencyCancelModal = false">
+    <div class="modal-content" @click.stop>
+      <h3>Emergency Cancel</h3>
+      <div class="deadline-notice error">This is for unforeseen circumstances only (e.g. illness, travel emergency). The meeting will be marked as <strong>Cancelled</strong> &mdash; no replacement will be auto-assigned.</div>
+      <label>Name
+        <select x-model="emergName">
+          <option value="">Select your name&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+      <label>Date
+        <select x-model="emergDate">
+          <option value="">Select the date&hellip;</option>
+          <template x-for="entry in emergCancelDatesForMember" :key="entry.date">
+            <option :value="entry.date" x-text="formatDateLong(entry.date)"></option>
+          </template>
+        </select>
+      </label>
+      <template x-if="emergName && emergCancelDatesForMember.length === 0">
+        <p><small>No upcoming dates assigned to this member.</small></p>
+      </template>
+      <label>Reason <small>(optional)</small>
+        <input type="text" x-model="emergReason" placeholder="e.g. illness, family emergency">
+      </label>
+      <div class="modal-actions">
+        <button class="secondary outline" @click="showEmergencyCancelModal = false">Go Back</button>
+        <button class="contrast" @click="submitEmergencyCancel()"
+                :aria-busy="emergSubmitting"
+                :disabled="emergSubmitting || !emergName || !emergDate">Confirm Cancellation</button>
+      </div>
     </div>
   </div>
 

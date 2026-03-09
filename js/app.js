@@ -21,6 +21,7 @@ document.addEventListener('alpine:init', () => {
     showSwapModal: false,
     showRandomModal: false,
     showFairnessModal: false,
+    showEmergencyCancelModal: false,
     showPollModal: false,
     showGenerateModal: false,
     showArchive: false,
@@ -43,6 +44,12 @@ document.addEventListener('alpine:init', () => {
     swapMember1: '',
     swapMember2: '',
     swapSubmitting: false,
+
+    // Emergency cancel form
+    emergName: '',
+    emergDate: '',
+    emergReason: '',
+    emergSubmitting: false,
 
     // Random assignment
     randomDate: '',
@@ -322,6 +329,9 @@ document.addEventListener('alpine:init', () => {
         if (res.movedToBuffer) {
           msg += ` Moved to buffer week: ${Scheduler.formatDate(res.movedToBuffer)}.`;
         }
+        if (res.autoAssigned) {
+          msg += ` ${res.autoAssigned} auto-assigned as replacement.`;
+        }
         this.notify(msg);
         this.showOptOutModal = false;
         await this.loadData();
@@ -360,6 +370,76 @@ document.addEventListener('alpine:init', () => {
       this.optOuts.push({ name: this.optOutName, date: this.optOutDate, reason: this.optOutReason });
       this.showOptOutModal = false;
       this.notify(`${this.optOutName} opted out of ${Scheduler.formatDate(this.optOutDate)}${bufferMsg} (local only).`);
+    },
+
+    // ===== Emergency cancel (no deadline — for emergencies) =====
+
+    openEmergencyCancelModal() {
+      this.emergName = '';
+      this.emergDate = '';
+      this.emergReason = '';
+      this.showEmergencyCancelModal = true;
+    },
+
+    get emergCancelDatesForMember() {
+      if (!this.emergName) return [];
+      return this.schedule.filter(s =>
+        !Scheduler.isPast(s.date) &&
+        s.status !== 'Holiday' && s.status !== 'Buffer' && s.status !== 'Cancelled' &&
+        Scheduler.parsePresenters(s.presenter).includes(this.emergName)
+      );
+    },
+
+    async submitEmergencyCancel() {
+      if (!this.emergName || !this.emergDate) {
+        this.notify('Please select your name and date.', 'error');
+        return;
+      }
+      this.emergSubmitting = true;
+
+      const res = await API.emergencyCancel(this.emergName, this.emergDate, this.emergReason);
+
+      if (res.success) {
+        let msg = `${this.emergName} emergency-cancelled ${Scheduler.formatDate(this.emergDate)}. Meeting marked as cancelled.`;
+        if (res.movedToBuffer) {
+          msg += ` Moved to buffer week: ${Scheduler.formatDate(res.movedToBuffer)}.`;
+        }
+        this.notify(msg);
+        this.showEmergencyCancelModal = false;
+        await this.loadData();
+      } else if (res.error) {
+        this.notify(res.error, 'error');
+        if (res.error.includes('not configured')) {
+          this.applyEmergencyCancelLocally();
+        }
+      }
+      this.emergSubmitting = false;
+    },
+
+    applyEmergencyCancelLocally() {
+      const entry = this.schedule.find(s => s.date === this.emergDate);
+      if (!entry) return;
+      const presenters = Scheduler.parsePresenters(entry.presenter)
+        .filter(p => p !== this.emergName);
+
+      const buffer = Scheduler.findNextBuffer(this.schedule, this.emergDate);
+      let bufferMsg = '';
+
+      if (presenters.length > 0) {
+        entry.presenter = presenters.join(' & ');
+      } else {
+        entry.presenter = '';
+        entry.status = 'Cancelled';
+      }
+
+      if (buffer) {
+        buffer.presenter = this.emergName;
+        buffer.status = 'TBD';
+        bufferMsg = ` Moved to buffer week: ${Scheduler.formatDate(buffer.date)}.`;
+      }
+
+      this.showEmergencyCancelModal = false;
+      this.notify(`${this.emergName} emergency-cancelled ${Scheduler.formatDate(this.emergDate)}.${bufferMsg} (local only).`);
     },
 
     // ===== Swap form (no deadline — available anytime) =====

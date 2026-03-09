@@ -71,6 +71,10 @@ const API = {
     return this.post('updateCredits', { credits });
   },
 
+  async emergencyCancel(name, date, reason) {
+    return this.post('emergencyCancel', { name, date, reason });
+  },
+
   async submitPoll(name, unavailableDates, preferredDate) {
     return this.post('submitPoll', { name, unavailableDates, preferredDate });
   },

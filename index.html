@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Group Meeting Schedule</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body x-data="meetingApp">
+
+  <!-- Notification toast -->
+  <div x-show="notification" x-transition class="notification"
+       :class="notificationType === 'error' ? 'notification-error' : 'notification-success'"
+       x-text="notification"></div>
+
+  <!-- Header -->
+  <header>
+    <h1>Group Meeting Schedule</h1>
+    <p>Every Monday, 3:00 PM CET &mdash; Spring 2026</p>
+  </header>
+
+  <!-- Fairness summary bar (click to expand) -->
+  <div class="fairness-summary" @click="openFairnessModal()"
+       :style="'border: 2px solid ' + fairnessColor()">
+    <div>
+      <div class="fairness-index" :style="'color:' + fairnessColor()"
+           x-text="fairnessIndex.toFixed(3)"></div>
+      <div class="fairness-label">Jain's Fairness Index (click for details)</div>
+    </div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="actions">
+    <button class="outline" @click="openVolunteerModal()">I Want to Present</button>
+    <button class="outline secondary" @click="openOptOutModal()">I Can't Present</button>
+    <button class="outline contrast" @click="openSwapModal()">Swap Dates</button>
+    <button class="outline" @click="openRandomModal()" style="border-color: var(--status-tbd); color: var(--status-tbd);">Assign Random Speaker</button>
+  </div>
+
+  <!-- Loading state -->
+  <div x-show="loading" class="loading-spinner">
+    <p aria-busy="true">Loading schedule&hellip;</p>
+  </div>
+
+  <!-- Schedule table -->
+  <div x-show="!loading" style="overflow-x: auto;">
+    <table class="schedule-table">
+      <thead>
+        <tr>
+          <th>Wk</th>
+          <th>Date</th>
+          <th>Presenter(s)</th>
+          <th>Type</th>
+          <th>Topic</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="entry in schedule" :key="entry.date">
+          <tr :class="rowClass(entry)">
+            <td><span class="week-num" x-text="entry.week"></span></td>
+            <td>
+              <span x-text="formatDate(entry.date)"></span>
+              <template x-if="isToday(entry.date)">
+                <small style="color: var(--status-confirmed);"> (Today)</small>
+              </template>
+              <template x-if="indicoLink(entry.date)">
+                <a :href="indicoLink(entry.date)" target="_blank" rel="noopener" class="indico-link"
+                   title="View on Indico">[Indico]</a>
+              </template>
+            </td>
+            <td>
+              <span class="presenter-name" x-text="entry.presenter || '—'"></span>
+            </td>
+            <td x-text="entry.type || '—'"></td>
+            <td class="topic-cell" :title="entry.topic" x-text="entry.topic || '—'"></td>
+            <td>
+              <span class="status-badge" :class="statusClass(entry.status)"
+                    x-text="statusBadge(entry.status)"></span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ========== MODALS ========== -->
+
+  <!-- Volunteer Modal -->
+  <div class="modal-backdrop" x-show="showVolunteerModal" x-transition @click.self="showVolunteerModal = false" @keydown.escape.window="showVolunteerModal = false">
+    <div class="modal-content" @click.stop>
+      <h3>I Want to Present</h3>
+      <label>Name
+        <select x-model="volName">
+          <option value="">Select your name&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+      <label>Preferred Date
+        <select x-model="volDate">
+          <option value="">Select a date&hellip;</option>
+          <template x-for="d in upcomingDates" :key="d">
+            <option :value="d" x-text="formatDateLong(d)"></option>
+          </template>
+        </select>
+      </label>
+      <label>Presentation Type
+        <select x-model="volType">
+          <option value="">Select type&hellip;</option>
+          <template x-for="t in $store.types" :key="t">
+            <option :value="t" x-text="t"></option>
+          </template>
+        </select>
+      </label>
+      <label>Topic
+        <input type="text" x-model="volTopic" placeholder="What will you present?">
+      </label>
+      <label>Abstract <small>(optional)</small>
+        <textarea x-model="volAbstract" rows="3" placeholder="Brief description&hellip;"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="secondary outline" @click="showVolunteerModal = false">Cancel</button>
+        <button @click="submitVolunteer()" :aria-busy="volSubmitting" :disabled="volSubmitting">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Opt-Out Modal -->
+  <div class="modal-backdrop" x-show="showOptOutModal" x-transition @click.self="showOptOutModal = false" @keydown.escape.window="showOptOutModal = false">
+    <div class="modal-content" @click.stop>
+      <h3>I Can't Present</h3>
+      <label>Name
+        <select x-model="optOutName">
+          <option value="">Select your name&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+      <label>Date
+        <select x-model="optOutDate">
+          <option value="">Select the date&hellip;</option>
+          <template x-for="entry in optOutDatesForMember" :key="entry.date">
+            <option :value="entry.date" x-text="formatDateLong(entry.date)"></option>
+          </template>
+        </select>
+      </label>
+      <template x-if="optOutName && optOutDatesForMember.length === 0">
+        <p><small>No upcoming dates assigned to this member.</small></p>
+      </template>
+      <label>Reason <small>(optional)</small>
+        <input type="text" x-model="optOutReason" placeholder="e.g. conference travel">
+      </label>
+      <div class="modal-actions">
+        <button class="secondary outline" @click="showOptOutModal = false">Cancel</button>
+        <button @click="submitOptOut()" :aria-busy="optOutSubmitting" :disabled="optOutSubmitting">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Swap Modal -->
+  <div class="modal-backdrop" x-show="showSwapModal" x-transition @click.self="showSwapModal = false" @keydown.escape.window="showSwapModal = false">
+    <div class="modal-content" @click.stop>
+      <h3>Swap Dates</h3>
+      <label>Member 1
+        <select x-model="swapMember1">
+          <option value="">Select first member&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+      <template x-if="swapMember1 && swapMember1Dates.length > 0">
+        <p><small x-text="swapMember1 + ' presents on: ' + swapMember1Dates.map(s => formatDate(s.date)).join(', ')"></small></p>
+      </template>
+      <label>Member 2
+        <select x-model="swapMember2">
+          <option value="">Select second member&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" :disabled="m === swapMember1" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+      <template x-if="swapMember2 && swapMember2Dates.length > 0">
+        <p><small x-text="swapMember2 + ' presents on: ' + swapMember2Dates.map(s => formatDate(s.date)).join(', ')"></small></p>
+      </template>
+      <template x-if="swapPreview">
+        <div class="swap-preview">
+          <strong>Preview:</strong><br>
+          <span x-text="swapMember1"></span> takes <span x-text="swapMember2"></span>'s next date<br>
+          <span x-text="swapMember2"></span> takes <span x-text="swapMember1"></span>'s next date
+        </div>
+      </template>
+      <div class="modal-actions">
+        <button class="secondary outline" @click="showSwapModal = false">Cancel</button>
+        <button @click="submitSwap()" :aria-busy="swapSubmitting" :disabled="swapSubmitting || !swapPreview">Confirm Swap</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Random Assignment Modal -->
+  <div class="modal-backdrop" x-show="showRandomModal" x-transition @click.self="showRandomModal = false" @keydown.escape.window="showRandomModal = false">
+    <div class="modal-content" @click.stop>
+      <h3>Assign Random Speaker</h3>
+      <label>Date (empty/TBD slots)
+        <select x-model="randomDate" @change="randomResult = null">
+          <option value="">Select a date&hellip;</option>
+          <template x-for="entry in emptySlots" :key="entry.date">
+            <option :value="entry.date" x-text="formatDateLong(entry.date) + (entry.presenter ? ' (has: ' + entry.presenter + ')' : '')"></option>
+          </template>
+        </select>
+      </label>
+      <template x-if="randomDate && emptySlots.length === 0">
+        <p><small>No empty slots available.</small></p>
+      </template>
+      <template x-if="!randomResult">
+        <div class="modal-actions">
+          <button class="secondary outline" @click="showRandomModal = false">Cancel</button>
+          <button @click="pickRandom()" :disabled="!randomDate">Pick Random</button>
+        </div>
+      </template>
+      <template x-if="randomResult">
+        <div>
+          <div class="random-result">
+            <div>Selected:</div>
+            <div class="name" x-text="randomResult"></div>
+            <div><small x-text="'for ' + formatDateLong(randomDate)"></small></div>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary outline" @click="randomResult = null">Re-roll</button>
+            <button @click="confirmRandom()" :aria-busy="randomSubmitting" :disabled="randomSubmitting">Confirm Assignment</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Fairness Modal -->
+  <div class="modal-backdrop" x-show="showFairnessModal" x-transition @click.self="showFairnessModal = false" @keydown.escape.window="showFairnessModal = false">
+    <div class="modal-content" @click.stop style="max-width: 560px;">
+      <h3>Fairness Tracker</h3>
+      <p>
+        <strong>Jain's Fairness Index:</strong>
+        <span :style="'color:' + fairnessColor()" x-text="fairnessIndex.toFixed(4)"></span>
+        <small>(target &ge; 0.90)</small>
+      </p>
+      <p><small>Credits: non-presenting members get +1/week; presenting resets to 0.</small></p>
+
+      <template x-for="m in sortedMembers" :key="m">
+        <div class="fairness-bar-row">
+          <div class="fairness-bar-name" x-text="m"></div>
+          <div class="fairness-bar-track">
+            <div class="fairness-bar-fill"
+                 :style="'width:' + ((credits[m] || 0) / maxCredit * 100) + '%; background:' + fairnessColor()">
+            </div>
+          </div>
+          <div class="fairness-bar-value" x-text="credits[m] || 0"></div>
+          <div class="fairness-counts" x-text="'(' + (presentationCounts[m] || 0) + ' talks)'"></div>
+        </div>
+      </template>
+
+      <div class="modal-actions" style="margin-top: 1.5rem;">
+        <button @click="showFairnessModal = false">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer style="text-align: center; margin-top: 2rem; padding: 1rem; opacity: 0.5; font-size: 0.8rem;">
+    <p>Organized by Pradyun &mdash; <span x-text="members.length"></span> members, <span x-text="schedule.length"></span> weeks</p>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/scheduler.js"></script>
+  <script src="js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <script>
+    // Alpine store for presentation types (used in templates)
+    document.addEventListener('alpine:init', () => {
+      Alpine.store('types', CONFIG.PRESENTATION_TYPES);
+    });
+  </script>
+</body>
+</html>

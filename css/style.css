@@ -1,0 +1,364 @@
+/* Group Meeting Scheduler — Custom Styles */
+
+:root {
+  --status-confirmed: #22c55e;
+  --status-volunteered: #3b82f6;
+  --status-tbd: #f59e0b;
+  --status-empty: #ef4444;
+  --current-week-bg: #fef3c7;
+  --past-week-opacity: 0.55;
+  --bar-bg: #e2e8f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --current-week-bg: #422006;
+    --bar-bg: #334155;
+  }
+}
+
+/* Layout */
+body {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+header h1 {
+  margin-bottom: 0.25rem;
+}
+
+header p {
+  margin: 0;
+  opacity: 0.7;
+}
+
+/* Action buttons row */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  justify-content: center;
+}
+
+.actions button {
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* Schedule table */
+.schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.schedule-table th,
+.schedule-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--pico-muted-border-color, #e2e8f0);
+}
+
+.schedule-table th {
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+}
+
+.schedule-table td:first-child,
+.schedule-table th:first-child {
+  width: 3rem;
+  text-align: center;
+}
+
+/* Row states */
+.past-week {
+  opacity: var(--past-week-opacity);
+}
+
+.current-week {
+  background: var(--current-week-bg);
+  font-weight: 600;
+}
+
+.current-week td:first-child {
+  position: relative;
+}
+
+.current-week td:first-child::before {
+  content: '▶';
+  position: absolute;
+  left: 0.15rem;
+  font-size: 0.7rem;
+}
+
+/* Status badges */
+.status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.status-confirmed {
+  background: var(--status-confirmed);
+  color: #fff;
+}
+
+.status-volunteered {
+  background: var(--status-volunteered);
+  color: #fff;
+}
+
+.status-tbd {
+  background: var(--status-tbd);
+  color: #000;
+}
+
+.status-empty {
+  background: var(--status-empty);
+  color: #fff;
+}
+
+/* Indico link */
+.indico-link {
+  font-size: 0.75rem;
+  margin-left: 0.35rem;
+  opacity: 0.7;
+}
+
+/* Fairness tracker */
+.fairness-summary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1.5rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.fairness-summary:hover {
+  opacity: 0.85;
+}
+
+.fairness-index {
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fairness-label {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.fairness-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.fairness-bar-name {
+  width: 6rem;
+  text-align: right;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.fairness-bar-track {
+  flex: 1;
+  height: 1.2rem;
+  background: var(--bar-bg);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.fairness-bar-fill {
+  height: 100%;
+  border-radius: 0.25rem;
+  transition: width 0.3s;
+  min-width: 2px;
+}
+
+.fairness-bar-value {
+  width: 3rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fairness-counts {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  text-align: right;
+}
+
+/* Modals */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: var(--pico-background-color, #fff);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.modal-actions button {
+  margin: 0;
+}
+
+/* Random result highlight */
+.random-result {
+  text-align: center;
+  padding: 1.5rem;
+  margin: 1rem 0;
+  border-radius: 0.5rem;
+  background: var(--current-week-bg);
+}
+
+.random-result .name {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+/* Notification toast */
+.notification {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  color: #fff;
+  font-weight: 500;
+  z-index: 1000;
+  animation: slideIn 0.2s ease-out;
+  max-width: 400px;
+}
+
+.notification-success {
+  background: var(--status-confirmed);
+}
+
+.notification-error {
+  background: var(--status-empty);
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Swap preview */
+.swap-preview {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--current-week-bg);
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .schedule-table {
+    font-size: 0.8rem;
+  }
+
+  .schedule-table th,
+  .schedule-table td {
+    padding: 0.35rem 0.4rem;
+  }
+
+  /* Hide abstract and type columns on mobile */
+  .schedule-table th:nth-child(4),
+  .schedule-table td:nth-child(4),
+  .schedule-table th:nth-child(5),
+  .schedule-table td:nth-child(5) {
+    display: none;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  .fairness-summary {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
+/* Loading spinner */
+.loading-spinner {
+  text-align: center;
+  padding: 3rem;
+  opacity: 0.6;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  opacity: 0.5;
+}
+
+/* Week number cell */
+.week-num {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.5;
+  font-size: 0.8rem;
+}
+
+/* Presenter cell */
+.presenter-name {
+  font-weight: 500;
+}
+
+/* Topic cell */
+.topic-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

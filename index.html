@@ -20,16 +20,6 @@
     <p>Every Monday, 3:00 PM CET &mdash; <span x-text="''+CONFIG.SEMESTER.label"></span></p>
   </header>
 
-  <!-- Fairness summary bar -->
-  <div class="fairness-summary" @click="openFairnessModal()"
-       :style="'border: 2px solid ' + fairnessColor()">
-    <div>
-      <div class="fairness-index" :style="'color:' + fairnessColor()"
-           x-text="fairnessIndex.toFixed(3)"></div>
-      <div class="fairness-label">Jain's Fairness Index (click for details)</div>
-    </div>
-  </div>
-
   <!-- Action buttons -->
   <div class="actions">
     <button class="outline" @click="openVolunteerModal()">I Want to Present</button>
@@ -88,9 +78,20 @@
     </table>
   </div>
 
-  <!-- Emergency cancel (subtle, at the bottom of the schedule) -->
-  <div x-show="!loading" style="text-align: center; margin: 0.5rem 0 1.5rem;">
-    <a href="#" @click.prevent="openEmergencyCancelModal()" class="emergency-cancel-link">Emergency Cancel (last-minute)</a>
+  <!-- Bottom bar: fairness (left) + emergency cancel (right) -->
+  <div class="bottom-bar" x-show="!loading">
+    <div class="bottom-bar-left" @click="openFairnessModal()">
+      <span class="bottom-fairness-value" :style="'color:' + fairnessColor()"
+            x-text="'J = ' + fairnessIndex.toFixed(3)"></span>
+      <span class="bottom-fairness-label">Fairness Index</span>
+      <span class="bottom-fairness-refs">
+        <a href="https://reimbar.org/posts/jain-fairness/" target="_blank" rel="noopener" title="Jain's Fairness Index" @click.stop>?</a>
+        <a href="https://en.wikipedia.org/wiki/Deficit_round_robin" target="_blank" rel="noopener" title="Deficit Round Robin (credit system)" @click.stop>?</a>
+      </span>
+    </div>
+    <div class="bottom-bar-right">
+      <a href="#" @click.prevent="openEmergencyCancelModal()" class="emergency-cancel-link">Emergency Cancel</a>
+    </div>
   </div>
 
   <!-- Organizer tools -->

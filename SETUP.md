@@ -168,7 +168,7 @@ Events from the next 90 days are fetched server-side, cached for 1 hour, and inc
    - `SLACK_WEBHOOK_URL`: the webhook URL
 
 Channel notifications are sent for:
-- Monday morning announcements (meeting details + Indico link)
+- Thursday midweek reminders about the upcoming Monday meeting (meeting details + Indico link)
 - Schedule changes (volunteer, swap, random assignment)
 - Saturday auto-cancellations (no speaker by Saturday night)
 - Emergency cancellations
@@ -185,26 +185,27 @@ Channel notifications are sent for:
    - To find a Slack User ID: open the member's profile in Slack → click **⋮** → **Copy member ID**
    - If upgrading an existing sheet, run `addSlackUserIdColumn()` from the Apps Script editor to add the column
 
-DM reminders are sent to presenters 9–10 days before their scheduled date.
+A single DM reminder is sent to the presenter 11 days before their scheduled date (on Thursday).
 
 ### Set Up Notification Triggers
 
 1. In the Apps Script editor, click the clock icon (**Triggers**) in the left sidebar
 2. Create two triggers:
 
-**Monday Channel Announcement:**
-- Function: `sendMondayAnnouncement`
+**Thursday Channel Reminder:**
+- Function: `sendThursdayReminder`
 - Deployment: **Head**
 - Event source: **Time-driven**
 - Type: **Week timer**
-- Day of week: **Monday**
-- Time of day: **8am to 9am**
+- Day of week: **Thursday**
+- Time of day: **9am to 10am**
 
-**Daily Presenter Reminder:**
-- Function: `sendDailyPresenterReminder`
+**Thursday Presenter Reminder:**
+- Function: `sendPresenterReminder`
 - Deployment: **Head**
 - Event source: **Time-driven**
-- Type: **Day timer**
+- Type: **Week timer**
+- Day of week: **Thursday**
 - Time of day: **9am to 10am**
 
 3. Click **Save** for each

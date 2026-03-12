@@ -176,7 +176,7 @@ function notifyPresenterReminder(ss, memberName, dateStr, daysAway, topic) {
   deadlineDate.setDate(deadlineDate.getDate() - OPT_OUT_DEADLINE_DAYS);
   var deadlineStr = Utilities.formatDate(deadlineDate, 'Europe/Zurich', 'EEEE, MMMM d');
 
-  var text = '\ud83d\udc4b Hi ' + memberName + '! Friendly reminder: you\'re scheduled to present at the RODEM HEP Weekly on *' + formattedDate + '* (' + daysAway + ' days from now).';
+  var text = '\ud83d\udc4b Hi ' + memberName + '! Friendly reminder: you\'re scheduled to present at the RODEM HEP Weekly on *' + formattedDate + '* at *3:00 PM CET* (' + daysAway + ' days from now).';
   text += '\nTopic: ' + topicStr;
   text += '\nIf you can\'t make it, please opt out or find a swap on the website by *' + deadlineStr + '*.';
 
@@ -799,14 +799,14 @@ function checkSaturdayCancellation() {
 }
 
 /**
- * Monday morning announcement trigger.
- * Posts the day's meeting details to #physics-general.
+ * Thursday midweek reminder trigger.
+ * Posts the upcoming Monday's meeting details to #physics-general.
  *
  * To set up:
  *   1. In Apps Script, go to Triggers (clock icon)
- *   2. Add trigger: sendMondayAnnouncement, Time-driven, Week timer, Every Monday, 8am to 9am
+ *   2. Add trigger: sendThursdayReminder, Time-driven, Week timer, Every Thursday, 9am to 10am
  */
-function sendMondayAnnouncement() {
+function sendThursdayReminder() {
   try {
     var ss = getSpreadsheet();
     var sheet = ss.getSheetByName('Schedule');
@@ -818,36 +818,43 @@ function sendMondayAnnouncement() {
     var topicCol = headers.indexOf('Topic');
     var statusCol = headers.indexOf('Status');
 
-    var todayStr = formatSheetDate(new Date());
+    // Compute next Monday from today
+    var today = new Date();
+    var dow = today.getDay(); // 0=Sun, 1=Mon, ..., 4=Thu
+    var daysUntilMonday = (8 - dow) % 7;
+    if (daysUntilMonday === 0) daysUntilMonday = 7; // if today is Monday, target next Monday
+    var nextMonday = new Date(today);
+    nextMonday.setDate(today.getDate() + daysUntilMonday);
+    var mondayStr = formatSheetDate(nextMonday);
 
     for (var i = 1; i < data.length; i++) {
       var cellDate = formatSheetDate(data[i][dateCol]);
-      if (cellDate === todayStr) {
+      if (cellDate === mondayStr) {
         var presenter = (data[i][presCol] || '').toString().trim();
         var type = (data[i][typeCol] || '').toString().trim();
         var topic = (data[i][topicCol] || '').toString().trim();
         var status = (data[i][statusCol] || '').toString().trim();
 
-        var indicoUrl = findIndicoUrlForDate(todayStr);
-        notifyChannelAnnouncement(todayStr, presenter, type, topic, status, indicoUrl);
-        logAction(ss, 'mondayAnnouncement', 'Announced meeting for ' + todayStr + ': ' + (presenter || status));
+        var indicoUrl = findIndicoUrlForDate(mondayStr);
+        notifyChannelAnnouncement(mondayStr, presenter, type, topic, status, indicoUrl);
+        logAction(ss, 'thursdayReminder', 'Announced upcoming meeting for ' + mondayStr + ': ' + (presenter || status));
         break;
       }
     }
   } catch (e) {
-    try { logAction(getSpreadsheet(), 'triggerError', 'sendMondayAnnouncement failed: ' + e.message); } catch (ignored) {}
+    try { logAction(getSpreadsheet(), 'triggerError', 'sendThursdayReminder failed: ' + e.message); } catch (ignored) {}
   }
 }
 
 /**
- * Daily presenter reminder trigger.
- * Sends DMs to presenters whose talks are 9 or 10 days away.
+ * Thursday presenter reminder trigger.
+ * Sends a single DM to presenters whose talk is 11 days away (Thursday → next-next Monday).
  *
  * To set up:
  *   1. In Apps Script, go to Triggers (clock icon)
- *   2. Add trigger: sendDailyPresenterReminder, Time-driven, Day timer, 9am to 10am
+ *   2. Add trigger: sendPresenterReminder, Time-driven, Week timer, Every Thursday, 9am to 10am
  */
-function sendDailyPresenterReminder() {
+function sendPresenterReminder() {
   try {
     var ss = getSpreadsheet();
     var sheet = ss.getSheetByName('Schedule');
@@ -861,34 +868,31 @@ function sendDailyPresenterReminder() {
     var today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    var reminderDays = [9, 10];
+    // Thursday + 11 days = Monday (the talk day, ~11 days notice)
+    var targetDate = new Date(today);
+    targetDate.setDate(targetDate.getDate() + 11);
+    var targetStr = formatSheetDate(targetDate);
 
-    for (var d = 0; d < reminderDays.length; d++) {
-      var targetDate = new Date(today);
-      targetDate.setDate(targetDate.getDate() + reminderDays[d]);
-      var targetStr = formatSheetDate(targetDate);
+    for (var i = 1; i < data.length; i++) {
+      var cellDate = formatSheetDate(data[i][dateCol]);
+      if (cellDate === targetStr) {
+        var presenter = (data[i][presCol] || '').toString().trim();
+        var topic = (data[i][topicCol] || '').toString().trim();
+        var status = (data[i][statusCol] || '').toString().trim();
 
-      for (var i = 1; i < data.length; i++) {
-        var cellDate = formatSheetDate(data[i][dateCol]);
-        if (cellDate === targetStr) {
-          var presenter = (data[i][presCol] || '').toString().trim();
-          var topic = (data[i][topicCol] || '').toString().trim();
-          var status = (data[i][statusCol] || '').toString().trim();
-
-          // Only remind for active assignments
-          if (presenter && status !== 'Holiday' && status !== 'Buffer' && status !== 'Cancelled' && status !== 'Empty') {
-            var names = presenter.split(/[,&]/).map(function(s) { return s.trim(); }).filter(Boolean);
-            for (var n = 0; n < names.length; n++) {
-              notifyPresenterReminder(ss, names[n], targetStr, reminderDays[d], topic);
-            }
-            logAction(ss, 'presenterReminder', 'Sent reminder for ' + targetStr + ' (' + reminderDays[d] + ' days away) to: ' + presenter);
+        // Only remind for active assignments
+        if (presenter && status !== 'Holiday' && status !== 'Buffer' && status !== 'Cancelled' && status !== 'Empty') {
+          var names = presenter.split(/[,&]/).map(function(s) { return s.trim(); }).filter(Boolean);
+          for (var n = 0; n < names.length; n++) {
+            notifyPresenterReminder(ss, names[n], targetStr, 11, topic);
           }
-          break;
+          logAction(ss, 'presenterReminder', 'Sent reminder for ' + targetStr + ' (11 days away) to: ' + presenter);
         }
+        break;
       }
     }
   } catch (e) {
-    try { logAction(getSpreadsheet(), 'triggerError', 'sendDailyPresenterReminder failed: ' + e.message); } catch (ignored) {}
+    try { logAction(getSpreadsheet(), 'triggerError', 'sendPresenterReminder failed: ' + e.message); } catch (ignored) {}
   }
 }
 

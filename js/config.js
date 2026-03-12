@@ -6,9 +6,6 @@ const CONFIG = {
   // Shared secret for basic request authentication (must match Apps Script property 'SECRET')
   SECRET: 'my-secret-key-2026',
 
-  // Indico category ID (optional — leave empty to disable)
-  INDICO_CATEGORY_ID: '',
-
   // Meeting details
   MEETING_TIME: '15:00 CET',
   MEETING_DAY: 'Monday',

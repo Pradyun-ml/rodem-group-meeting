@@ -9,6 +9,14 @@
  * Set the shared secret in Script Properties (key: SECRET)
  *
  * Sheet tabs: Schedule, Members, OptOuts, Log, PollResponses, Archive
+ *
+ * Script Properties (Project Settings > Script Properties):
+ *   SECRET              — shared auth secret (must match config.js)
+ *   SLACK_WEBHOOK_URL   — Slack incoming webhook for #physics-general (optional)
+ *   SLACK_BOT_TOKEN     — Slack bot token with chat:write scope (optional)
+ *   INDICO_API_TOKEN    — Indico personal API token with read scope (optional)
+ *   INDICO_BASE_URL     — Indico instance URL (default: https://partphys-indico.unige.ch)
+ *   INDICO_CATEGORY_ID  — Indico category ID (default: 19)
  */
 
 // ============================================================
@@ -23,6 +31,250 @@ function getSecret() {
 
 function getSpreadsheet() {
   return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function getSlackWebhookUrl() {
+  return PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL') || '';
+}
+
+function getSlackBotToken() {
+  return PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN') || '';
+}
+
+function getIndicoApiToken() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_API_TOKEN') || '';
+}
+
+function getIndicoBaseUrl() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_BASE_URL') || 'https://partphys-indico.unige.ch';
+}
+
+function getIndicoCategoryId() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_CATEGORY_ID') || '19';
+}
+
+// ============================================================
+// Slack Messaging
+// ============================================================
+
+/**
+ * Post a message to #physics-general via incoming webhook.
+ * Never throws — errors are logged silently.
+ */
+function sendSlackWebhook(text) {
+  var url = getSlackWebhookUrl();
+  if (!url) return;
+  try {
+    UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ text: text }),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    try { logAction(getSpreadsheet(), 'slackError', 'Webhook failed: ' + e.message); } catch (ignored) {}
+  }
+}
+
+/**
+ * Send a DM to a member via Slack chat.postMessage API.
+ * Requires SLACK_BOT_TOKEN with chat:write scope.
+ * Never throws — errors are logged silently.
+ */
+function sendSlackDM(slackUserId, text) {
+  var token = getSlackBotToken();
+  if (!token || !slackUserId) return;
+  try {
+    var res = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'Authorization': 'Bearer ' + token },
+      payload: JSON.stringify({ channel: slackUserId, text: text }),
+      muteHttpExceptions: true
+    });
+    var json = JSON.parse(res.getContentText());
+    if (!json.ok) {
+      logAction(getSpreadsheet(), 'slackError', 'DM to ' + slackUserId + ' failed: ' + (json.error || 'unknown'));
+    }
+  } catch (e) {
+    try { logAction(getSpreadsheet(), 'slackError', 'DM failed: ' + e.message); } catch (ignored) {}
+  }
+}
+
+/**
+ * Look up a member's Slack User ID from the Members sheet.
+ * Returns empty string if not found or column doesn't exist.
+ */
+function lookupSlackUserId(ss, memberName) {
+  var sheet = ss.getSheetByName('Members');
+  if (!sheet) return '';
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = headers.indexOf('Name');
+  var slackCol = headers.indexOf('SlackUserID');
+  if (nameCol === -1 || slackCol === -1) return '';
+  for (var i = 1; i < data.length; i++) {
+    if ((data[i][nameCol] || '').toString() === memberName) {
+      return (data[i][slackCol] || '').toString().trim();
+    }
+  }
+  return '';
+}
+
+/**
+ * Format a YYYY-MM-DD date string for Slack messages.
+ * Returns e.g. "Monday, March 30, 2026"
+ */
+function formatDateForSlack(dateStr) {
+  var d = new Date(dateStr + 'T12:00:00');
+  return Utilities.formatDate(d, 'Europe/Zurich', 'EEEE, MMMM d, yyyy');
+}
+
+// ============================================================
+// Notification Composers
+// ============================================================
+
+/**
+ * Post the Monday morning meeting announcement to #physics-general.
+ */
+function notifyChannelAnnouncement(dateStr, presenter, type, topic, status, indicoUrl) {
+  var formattedDate = formatDateForSlack(dateStr);
+  var text;
+
+  if (status === 'Cancelled' || (status === 'Empty' && !presenter)) {
+    text = '\u274c *RODEM HEP Weekly \u2014 ' + formattedDate + '* \u2014 Meeting cancelled this week';
+  } else if ((status === 'Buffer' && !presenter) || (!presenter && status !== 'Holiday')) {
+    text = '\ud83d\udcc5 *RODEM HEP Weekly \u2014 ' + formattedDate + '* \u2014 No speaker scheduled. Volunteers welcome on the website!';
+  } else if (status === 'Holiday') {
+    return; // no announcement for holidays
+  } else {
+    text = '\ud83d\udcc5 *RODEM HEP Weekly \u2014 ' + formattedDate + '*';
+    text += '\n\ud83d\udc64 Speaker: ' + presenter;
+    if (topic) {
+      text += '\n\ud83d\udcdd Topic: ' + topic;
+      if (type) text += ' (' + type + ')';
+    }
+    if (indicoUrl) {
+      text += '\n\ud83d\udd17 Indico: ' + indicoUrl;
+    }
+  }
+
+  sendSlackWebhook(text);
+}
+
+/**
+ * Send a personal reminder DM to a presenter.
+ */
+function notifyPresenterReminder(ss, memberName, dateStr, daysAway, topic) {
+  var slackId = lookupSlackUserId(ss, memberName);
+  if (!slackId) return;
+
+  var formattedDate = formatDateForSlack(dateStr);
+  var topicStr = topic ? topic : 'TBD \u2014 please update on the website';
+
+  var deadlineDate = new Date(dateStr + 'T12:00:00');
+  deadlineDate.setDate(deadlineDate.getDate() - OPT_OUT_DEADLINE_DAYS);
+  var deadlineStr = Utilities.formatDate(deadlineDate, 'Europe/Zurich', 'EEEE, MMMM d');
+
+  var text = '\ud83d\udc4b Hi ' + memberName + '! Friendly reminder: you\'re scheduled to present at the RODEM HEP Weekly on *' + formattedDate + '* (' + daysAway + ' days from now).';
+  text += '\nTopic: ' + topicStr;
+  text += '\nIf you can\'t make it, please opt out or find a swap on the website by *' + deadlineStr + '*.';
+
+  sendSlackDM(slackId, text);
+}
+
+/**
+ * Post a schedule change notification to #physics-general.
+ */
+function notifyChannelReassignment(dateStr, newPresenter, description) {
+  var formattedDate = formatDateForSlack(dateStr);
+  var text = '\ud83d\udd04 *Schedule Update \u2014 ' + formattedDate + '*\n' + description;
+  if (newPresenter) {
+    text += '\n\ud83d\udc64 New speaker: ' + newPresenter;
+  }
+  sendSlackWebhook(text);
+}
+
+/**
+ * Send a DM to a member who has been assigned to present.
+ */
+function notifyPresenterAssignment(ss, memberName, dateStr, reason) {
+  var slackId = lookupSlackUserId(ss, memberName);
+  if (!slackId) return;
+
+  var formattedDate = formatDateForSlack(dateStr);
+  var text = '\ud83d\udce2 You\'ve been ' + reason + ' for the RODEM HEP Weekly on *' + formattedDate + '*. Please update your topic on the website.';
+
+  sendSlackDM(slackId, text);
+}
+
+// ============================================================
+// Indico Integration (Server-Side)
+// ============================================================
+
+/**
+ * Fetch upcoming events from the Indico category.
+ * Results are cached for 1 hour to reduce API load.
+ * Returns [{date, url, title}] or [] on failure.
+ */
+function fetchIndicoEvents() {
+  try {
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get('indicoEvents');
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    var token = getIndicoApiToken();
+    if (!token) return [];
+
+    var baseUrl = getIndicoBaseUrl();
+    var categoryId = getIndicoCategoryId();
+    var url = baseUrl + '/export/categ/' + categoryId + '.json?from=today&to=+90d';
+
+    var res = UrlFetchApp.fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+
+    var code = res.getResponseCode();
+    if (code !== 200) {
+      logAction(getSpreadsheet(), 'indicoError', 'Indico API returned HTTP ' + code);
+      return [];
+    }
+
+    var json = JSON.parse(res.getContentText());
+    var results = json.results || [];
+    var events = results.map(function(r) {
+      var dateStr = '';
+      if (r.startDate && r.startDate.date) {
+        dateStr = r.startDate.date;
+      }
+      return {
+        date: dateStr,
+        url: r.url || '',
+        title: r.title || ''
+      };
+    }).filter(function(e) { return e.date; });
+
+    cache.put('indicoEvents', JSON.stringify(events), 3600);
+    return events;
+  } catch (e) {
+    try { logAction(getSpreadsheet(), 'indicoError', 'fetchIndicoEvents failed: ' + e.message); } catch (ignored) {}
+    return [];
+  }
+}
+
+/**
+ * Find the Indico event URL for a specific date.
+ * Returns the URL string or empty string.
+ */
+function findIndicoUrlForDate(dateStr) {
+  var events = fetchIndicoEvents();
+  for (var i = 0; i < events.length; i++) {
+    if (events[i].date === dateStr) return events[i].url;
+  }
+  return '';
 }
 
 // ============================================================
@@ -41,6 +293,7 @@ function doGet(e) {
   var optOuts = readOptOuts(ss);
   var archive = readArchive(ss);
   var pollResponses = readPollResponses(ss);
+  var indicoEvents = fetchIndicoEvents();
 
   return jsonResponse({
     success: true,
@@ -48,7 +301,8 @@ function doGet(e) {
     members: members,
     optOuts: optOuts,
     archive: archive,
-    pollResponses: pollResponses
+    pollResponses: pollResponses,
+    indicoEvents: indicoEvents
   });
 }
 
@@ -107,6 +361,43 @@ function doPost(e) {
     result = { success: false, error: err.message };
   } finally {
     lock.releaseLock();
+  }
+
+  // --- Slack notifications (post-lock, errors never affect result) ---
+  if (result && result.success) {
+    try {
+      var ss = getSpreadsheet();
+      switch (action) {
+        case 'volunteer':
+          notifyChannelReassignment(body.date, body.name, body.name + ' volunteered');
+          notifyPresenterAssignment(ss, body.name, body.date, 'signed up to present');
+          break;
+        case 'optOut':
+          if (result.autoAssigned) {
+            notifyChannelReassignment(body.date, result.autoAssigned,
+              body.name + ' opted out \u2192 ' + result.autoAssigned + ' auto-assigned');
+            notifyPresenterAssignment(ss, result.autoAssigned, body.date,
+              'auto-assigned as replacement for ' + body.name);
+          }
+          break;
+        case 'swap':
+          notifyChannelReassignment(body.date1, body.member2,
+            'Swap: ' + body.member1 + ' \u2194 ' + body.member2);
+          notifyPresenterAssignment(ss, body.member1, body.date2, 'swapped to present');
+          notifyPresenterAssignment(ss, body.member2, body.date1, 'swapped to present');
+          break;
+        case 'assignRandom':
+          notifyChannelReassignment(body.date, body.name, body.name + ' randomly assigned');
+          notifyPresenterAssignment(ss, body.name, body.date, 'randomly assigned to present');
+          break;
+        case 'emergencyCancel':
+          notifyChannelReassignment(body.date, null,
+            body.name + ' emergency-cancelled; meeting cancelled');
+          break;
+      }
+    } catch (notifyErr) {
+      try { logAction(getSpreadsheet(), 'notificationError', notifyErr.message); } catch (ignored) {}
+    }
   }
 
   return jsonResponse(result);
@@ -458,11 +749,12 @@ function handleArchiveAndSave(body) {
 }
 
 // ============================================================
-// Saturday auto-cancellation trigger
+// Time-Driven Triggers
 // ============================================================
 
 /**
- * Run this as a time-driven trigger every Saturday at midnight CET.
+ * Saturday auto-cancellation trigger.
+ * Run as a time-driven trigger every Saturday at midnight CET.
  * Checks the coming Monday — if a slot is empty, marks it as 'Cancelled'.
  *
  * To set up:
@@ -495,9 +787,108 @@ function checkSaturdayCancellation() {
         var rowIndex = i + 1;
         sheet.getRange(rowIndex, statusCol + 1).setValue('Cancelled');
         logAction(ss, 'autoCancellation', 'Meeting on ' + mondayStr + ' auto-cancelled (no speaker by Saturday deadline)');
+
+        // Notify Slack
+        try {
+          notifyChannelAnnouncement(mondayStr, '', '', '', 'Cancelled', '');
+        } catch (e) { /* logged inside notifyChannelAnnouncement */ }
       }
       break;
     }
+  }
+}
+
+/**
+ * Monday morning announcement trigger.
+ * Posts the day's meeting details to #physics-general.
+ *
+ * To set up:
+ *   1. In Apps Script, go to Triggers (clock icon)
+ *   2. Add trigger: sendMondayAnnouncement, Time-driven, Week timer, Every Monday, 8am to 9am
+ */
+function sendMondayAnnouncement() {
+  try {
+    var ss = getSpreadsheet();
+    var sheet = ss.getSheetByName('Schedule');
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
+    var dateCol = headers.indexOf('Date');
+    var presCol = headers.indexOf('Presenter');
+    var typeCol = headers.indexOf('Type');
+    var topicCol = headers.indexOf('Topic');
+    var statusCol = headers.indexOf('Status');
+
+    var todayStr = formatSheetDate(new Date());
+
+    for (var i = 1; i < data.length; i++) {
+      var cellDate = formatSheetDate(data[i][dateCol]);
+      if (cellDate === todayStr) {
+        var presenter = (data[i][presCol] || '').toString().trim();
+        var type = (data[i][typeCol] || '').toString().trim();
+        var topic = (data[i][topicCol] || '').toString().trim();
+        var status = (data[i][statusCol] || '').toString().trim();
+
+        var indicoUrl = findIndicoUrlForDate(todayStr);
+        notifyChannelAnnouncement(todayStr, presenter, type, topic, status, indicoUrl);
+        logAction(ss, 'mondayAnnouncement', 'Announced meeting for ' + todayStr + ': ' + (presenter || status));
+        break;
+      }
+    }
+  } catch (e) {
+    try { logAction(getSpreadsheet(), 'triggerError', 'sendMondayAnnouncement failed: ' + e.message); } catch (ignored) {}
+  }
+}
+
+/**
+ * Daily presenter reminder trigger.
+ * Sends DMs to presenters whose talks are 9 or 10 days away.
+ *
+ * To set up:
+ *   1. In Apps Script, go to Triggers (clock icon)
+ *   2. Add trigger: sendDailyPresenterReminder, Time-driven, Day timer, 9am to 10am
+ */
+function sendDailyPresenterReminder() {
+  try {
+    var ss = getSpreadsheet();
+    var sheet = ss.getSheetByName('Schedule');
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
+    var dateCol = headers.indexOf('Date');
+    var presCol = headers.indexOf('Presenter');
+    var topicCol = headers.indexOf('Topic');
+    var statusCol = headers.indexOf('Status');
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    var reminderDays = [9, 10];
+
+    for (var d = 0; d < reminderDays.length; d++) {
+      var targetDate = new Date(today);
+      targetDate.setDate(targetDate.getDate() + reminderDays[d]);
+      var targetStr = formatSheetDate(targetDate);
+
+      for (var i = 1; i < data.length; i++) {
+        var cellDate = formatSheetDate(data[i][dateCol]);
+        if (cellDate === targetStr) {
+          var presenter = (data[i][presCol] || '').toString().trim();
+          var topic = (data[i][topicCol] || '').toString().trim();
+          var status = (data[i][statusCol] || '').toString().trim();
+
+          // Only remind for active assignments
+          if (presenter && status !== 'Holiday' && status !== 'Buffer' && status !== 'Cancelled' && status !== 'Empty') {
+            var names = presenter.split(/[,&]/).map(function(s) { return s.trim(); }).filter(Boolean);
+            for (var n = 0; n < names.length; n++) {
+              notifyPresenterReminder(ss, names[n], targetStr, reminderDays[d], topic);
+            }
+            logAction(ss, 'presenterReminder', 'Sent reminder for ' + targetStr + ' (' + reminderDays[d] + ' days away) to: ' + presenter);
+          }
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    try { logAction(getSpreadsheet(), 'triggerError', 'sendDailyPresenterReminder failed: ' + e.message); } catch (ignored) {}
   }
 }
 
@@ -743,6 +1134,21 @@ function resetAndSetupSheets() {
   _doSetup(true);
 }
 
+/**
+ * Add SlackUserID column to an existing Members sheet.
+ * Safe to run multiple times (idempotent).
+ */
+function addSlackUserIdColumn() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Members');
+  if (!sheet) return;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf('SlackUserID') !== -1) return; // already exists
+  var nextCol = headers.length + 1;
+  sheet.getRange(1, nextCol).setValue('SlackUserID');
+  logAction(ss, 'setup', 'Added SlackUserID column to Members sheet');
+}
+
 function _doSetup(forceReset) {
   var ss = getSpreadsheet();
 
@@ -787,19 +1193,19 @@ function _doSetup(forceReset) {
   var membSheet = _getOrCreateSheet(ss, 'Members');
   if (forceReset || membSheet.getLastRow() <= 1) {
     membSheet.clearContents();
-    membSheet.appendRow(['Name', 'Email', 'Credits', 'LastPresented', 'TotalPresentations', 'Active']);
+    membSheet.appendRow(['Name', 'Email', 'Credits', 'LastPresented', 'TotalPresentations', 'Active', 'SlackUserID']);
     var membData = [
-      ['Andreas',   '', 0, '', 0, 'Yes'],
-      ['Frank',     '', 0, '', 0, 'Yes'],
-      ['Giovanni',  '', 0, '', 0, 'Yes'],
-      ['Guillaume', '', 0, '', 0, 'Yes'],
-      ['Ivan',      '', 0, '', 0, 'Yes'],
-      ['Jona',      '', 0, '', 0, 'Yes'],
-      ['Matej',     '', 0, '', 0, 'Yes'],
-      ['Pradyun',   '', 0, '', 0, 'Yes'],
-      ['Stephen',   '', 0, '', 0, 'Yes'],
-      ['Theresa',   '', 0, '', 0, 'Yes'],
-      ['Vincent',   '', 0, '', 0, 'Yes']
+      ['Andreas',   '', 0, '', 0, 'Yes', ''],
+      ['Frank',     '', 0, '', 0, 'Yes', ''],
+      ['Giovanni',  '', 0, '', 0, 'Yes', ''],
+      ['Guillaume', '', 0, '', 0, 'Yes', ''],
+      ['Ivan',      '', 0, '', 0, 'Yes', ''],
+      ['Jona',      '', 0, '', 0, 'Yes', ''],
+      ['Matej',     '', 0, '', 0, 'Yes', ''],
+      ['Pradyun',   '', 0, '', 0, 'Yes', ''],
+      ['Stephen',   '', 0, '', 0, 'Yes', ''],
+      ['Theresa',   '', 0, '', 0, 'Yes', ''],
+      ['Vincent',   '', 0, '', 0, 'Yes', '']
     ];
     membSheet.getRange(2, 1, membData.length, membData[0].length).setValues(membData);
   }

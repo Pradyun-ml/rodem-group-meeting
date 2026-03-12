@@ -71,7 +71,6 @@ document.addEventListener('alpine:init', () => {
 
     async init() {
       await this.loadData();
-      this.loadIndicoEvents();
     },
 
     async loadData() {
@@ -85,6 +84,7 @@ document.addEventListener('alpine:init', () => {
         this.optOuts = data.optOuts || [];
         this.archive = data.archive || [];
         this.pollResponses = data.pollResponses || [];
+        this.indicoEvents = data.indicoEvents || [];
         if (data.members) {
           const memberData = {};
           data.members.forEach(m => { memberData[m.name] = m.credits || 0; });
@@ -98,13 +98,10 @@ document.addEventListener('alpine:init', () => {
         this.optOuts = [];
         this.archive = [];
         this.pollResponses = [];
+        this.indicoEvents = [];
       }
 
       this.loading = false;
-    },
-
-    async loadIndicoEvents() {
-      this.indicoEvents = await API.fetchIndicoEvents();
     },
 
     // ===== Computed properties =====
@@ -214,16 +211,8 @@ document.addEventListener('alpine:init', () => {
 
     indicoLink(date) {
       if (!this.indicoEvents.length) return null;
-      const target = new Date(date + 'T00:00:00');
-      for (const ev of this.indicoEvents) {
-        const evDate = new Date(ev.startDate.date);
-        if (evDate.getFullYear() === target.getFullYear() &&
-            evDate.getMonth() === target.getMonth() &&
-            evDate.getDate() === target.getDate()) {
-          return ev.url;
-        }
-      }
-      return null;
+      const event = this.indicoEvents.find(ev => ev.date === date);
+      return event ? event.url : null;
     },
 
     // ===== Volunteer form =====

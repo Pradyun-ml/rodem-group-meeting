@@ -53,19 +53,19 @@ If `setupSheets` doesn't populate correctly (e.g. tabs were already partially cr
 | 27 | 2026-09-28 | Andreas | | | | TBD |
 
 ### Tab: Members
-| Name | Email | Credits | LastPresented | TotalPresentations | Active |
-|------|-------|---------|---------------|-------------------|--------|
-| Andreas | | 0 | | 0 | Yes |
-| Frank | | 0 | | 0 | Yes |
-| Giovanni | | 0 | | 0 | Yes |
-| Guillaume | | 0 | | 0 | Yes |
-| Ivan | | 0 | | 0 | Yes |
-| Jona | | 0 | | 0 | Yes |
-| Matej | | 0 | | 0 | Yes |
-| Pradyun | | 0 | | 0 | Yes |
-| Stephen | | 0 | | 0 | Yes |
-| Theresa | | 0 | | 0 | Yes |
-| Vincent | | 0 | | 0 | Yes |
+| Name | Email | Credits | LastPresented | TotalPresentations | Active | SlackUserID |
+|------|-------|---------|---------------|-------------------|--------|-------------|
+| Andreas | | 0 | | 0 | Yes | |
+| Frank | | 0 | | 0 | Yes | |
+| Giovanni | | 0 | | 0 | Yes | |
+| Guillaume | | 0 | | 0 | Yes | |
+| Ivan | | 0 | | 0 | Yes | |
+| Jona | | 0 | | 0 | Yes | |
+| Matej | | 0 | | 0 | Yes | |
+| Pradyun | | 0 | | 0 | Yes | |
+| Stephen | | 0 | | 0 | Yes | |
+| Theresa | | 0 | | 0 | Yes | |
+| Vincent | | 0 | | 0 | Yes | |
 
 ### Tab: OptOuts
 | Timestamp | Name | Date | Reason |
@@ -145,13 +145,71 @@ const CONFIG = {
 5. Branch: **main**, folder: **/ (root)**
 6. Save — your site will be live at `https://yourusername.github.io/repo-name/`
 
-## 9. Optional: Indico Integration
+## 9. Optional: Indico Integration (Server-Side)
 
-If your group uses CERN's Indico for event management:
+If your group uses Indico for event management, the backend fetches events server-side (no frontend config needed).
 
-1. Find your Indico category ID (the number in the URL: `https://indico.cern.ch/category/XXXX/`)
-2. Set `INDICO_CATEGORY_ID` in `js/config.js`
-3. Events from the next 90 days will appear as `[Indico]` links next to matching dates
+1. Create an API token at your Indico instance (Profile → API tokens, read scope)
+2. In Apps Script **Project Settings > Script Properties**, add:
+   - `INDICO_API_TOKEN`: your API token
+   - `INDICO_BASE_URL`: your Indico instance URL (e.g. `https://partphys-indico.unige.ch`)
+   - `INDICO_CATEGORY_ID`: category ID from the URL (e.g. `19`)
+3. Create a **new deployment** for changes to take effect
+
+Events from the next 90 days are fetched server-side, cached for 1 hour, and included in the API response. Matching dates show `[Indico]` links automatically. If Indico is unreachable, links simply don't appear.
+
+## 10. Optional: Slack Integration
+
+### Channel Notifications (Incoming Webhook)
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new Slack App for your workspace
+2. Enable **Incoming Webhooks** and create a webhook for your channel (e.g. `#physics-general`)
+3. In Apps Script **Project Settings > Script Properties**, add:
+   - `SLACK_WEBHOOK_URL`: the webhook URL
+
+Channel notifications are sent for:
+- Monday morning announcements (meeting details + Indico link)
+- Schedule changes (volunteer, swap, random assignment)
+- Saturday auto-cancellations (no speaker by Saturday night)
+- Emergency cancellations
+
+### Personal DM Reminders (Bot Token)
+
+1. In your Slack App, go to **OAuth & Permissions**
+2. Add the bot scope: `chat:write`
+3. Install the app to your workspace
+4. Copy the **Bot User OAuth Token**
+5. In Apps Script **Project Settings > Script Properties**, add:
+   - `SLACK_BOT_TOKEN`: the bot token (starts with `xoxb-`)
+6. In the Google Sheet **Members** tab, fill in the **SlackUserID** column for each member
+   - To find a Slack User ID: open the member's profile in Slack → click **⋮** → **Copy member ID**
+   - If upgrading an existing sheet, run `addSlackUserIdColumn()` from the Apps Script editor to add the column
+
+DM reminders are sent to presenters 9–10 days before their scheduled date.
+
+### Set Up Notification Triggers
+
+1. In the Apps Script editor, click the clock icon (**Triggers**) in the left sidebar
+2. Create two triggers:
+
+**Monday Channel Announcement:**
+- Function: `sendMondayAnnouncement`
+- Deployment: **Head**
+- Event source: **Time-driven**
+- Type: **Week timer**
+- Day of week: **Monday**
+- Time of day: **8am to 9am**
+
+**Daily Presenter Reminder:**
+- Function: `sendDailyPresenterReminder`
+- Deployment: **Head**
+- Event source: **Time-driven**
+- Type: **Day timer**
+- Time of day: **9am to 10am**
+
+3. Click **Save** for each
+
+**Important:** Set the project timezone to **Europe/Zurich** in Apps Script **Project Settings** so triggers fire at the correct local time.
 
 ## Troubleshooting
 
@@ -161,3 +219,6 @@ If your group uses CERN's Indico for event management:
 - **Permission errors**: Re-authorize the script if Google prompts you
 - **Schedule not loading**: Check browser console. The site works offline with local defaults if the backend is not configured
 - **Saturday trigger not firing**: Check Triggers in Apps Script — the trigger must be set up manually (step 6)
+- **Slack notifications not sending**: Verify Script Properties are set correctly (no quotes around values). Check the Log sheet for `notificationError` entries
+- **No Indico links**: Check INDICO_API_TOKEN, INDICO_BASE_URL, and INDICO_CATEGORY_ID in Script Properties. Events are cached for 1 hour
+- **DMs not received**: Ensure the member's SlackUserID is filled in the Members sheet and the bot has `chat:write` scope

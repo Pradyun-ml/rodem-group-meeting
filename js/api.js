@@ -81,45 +81,5 @@ const API = {
 
   async archiveAndSave(semesterLabel, newSchedule) {
     return this.post('archiveAndSave', { semesterLabel, newSchedule });
-  },
-
-  // --- Indico integration (optional) ---
-
-  fetchIndicoEvents() {
-    return new Promise((resolve) => {
-      if (!CONFIG.INDICO_CATEGORY_ID) {
-        resolve([]);
-        return;
-      }
-      const callbackName = '_indicoCb_' + Date.now();
-      const script = document.createElement('script');
-
-      const cleanup = () => {
-        delete window[callbackName];
-        if (script.parentNode) script.parentNode.removeChild(script);
-      };
-
-      window[callbackName] = (data) => {
-        cleanup();
-        resolve(data.results || []);
-      };
-
-      script.onerror = () => {
-        cleanup();
-        console.warn('Indico JSONP request failed');
-        resolve([]);
-      };
-
-      const catId = CONFIG.INDICO_CATEGORY_ID;
-      script.src = `https://indico.cern.ch/export/categ/${catId}.jsonp?from=today&to=+90d&jsonp=${callbackName}`;
-      document.head.appendChild(script);
-
-      setTimeout(() => {
-        if (window[callbackName]) {
-          cleanup();
-          resolve([]);
-        }
-      }, 10000);
-    });
   }
 };

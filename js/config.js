@@ -1,7 +1,7 @@
 // Configuration — fill in after deploying Google Apps Script
 const CONFIG = {
   // Google Apps Script Web App URL (deploy as "Execute as: Me", "Who has access: Anyone")
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxJnp2p0Foq40fnFM-DbR88jKpgrXuqpY4kHLoaz5JAoMlhWK6nfJ2O3LcBeNFT1zsLRA/exec',
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycby07Df5kImQfZPtXf_1TooL-Kbv7G19yVZUU0k3RDnoMKK95AW08UHfSkW7tgdxpRSq/exec',
 
   // Shared secret for basic request authentication (must match Apps Script property 'SECRET')
   SECRET: 'my-secret-key-2026',

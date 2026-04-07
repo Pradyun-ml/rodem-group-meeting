@@ -17,6 +17,8 @@
  *   INDICO_API_TOKEN    — Indico personal API token with read scope (optional)
  *   INDICO_BASE_URL     — Indico instance URL (default: https://partphys-indico.unige.ch)
  *   INDICO_CATEGORY_ID  — Indico category ID (default: 19)
+ *   INDICO_ROOM_NAME    — Room name for auto-created events (default: AEM 026)
+ *   INDICO_DESCRIPTION  — Fixed description for auto-created events (e.g. Zoom info)
  */
 
 // ============================================================
@@ -51,6 +53,14 @@ function getIndicoBaseUrl() {
 
 function getIndicoCategoryId() {
   return PropertiesService.getScriptProperties().getProperty('INDICO_CATEGORY_ID') || '19';
+}
+
+function getIndicoRoomName() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_ROOM_NAME') || 'AEM 026';
+}
+
+function getIndicoDescription() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_DESCRIPTION') || '';
 }
 
 // ============================================================
@@ -278,6 +288,232 @@ function findIndicoUrlForDate(dateStr) {
 }
 
 // ============================================================
+// Indico Event Creation / Deletion (Phase 1)
+// ============================================================
+
+/**
+ * Clear the Indico events cache so the next read fetches fresh data.
+ */
+function clearIndicoCache() {
+  try { CacheService.getScriptCache().remove('indicoEvents'); } catch (e) {}
+}
+
+/**
+ * Extract event ID from an Indico URL like https://host/event/123/
+ */
+function extractIndicoEventId(url) {
+  var match = url.match(/\/event\/(\d+)/);
+  return match ? match[1] : '';
+}
+
+/**
+ * Log an Indico failure and post a Slack warning.
+ * Never throws.
+ */
+function indicoFailureNotification(action, dateStr, errorMsg) {
+  try {
+    var msg = '\u26a0\ufe0f Indico auto-' + action + ' failed for ' + dateStr + ': ' + errorMsg + '. Please handle manually.';
+    logAction(getSpreadsheet(), 'indicoError', msg);
+    sendSlackWebhook(msg);
+  } catch (e) {}
+}
+
+/**
+ * Create an Indico meeting event via form POST.
+ * If an event already exists for this date, updates the chairperson instead.
+ * Returns the new event URL or '' on failure. Never throws.
+ */
+function createIndicoEvent(dateStr, presenterName) {
+  var token = getIndicoApiToken();
+  if (!token) return '';
+
+  // If event already exists, update instead
+  var existing = findIndicoUrlForDate(dateStr);
+  if (existing) {
+    updateIndicoChairperson(dateStr, presenterName);
+    return existing;
+  }
+
+  try {
+    var baseUrl = getIndicoBaseUrl();
+    var categoryId = getIndicoCategoryId();
+    var roomName = getIndicoRoomName();
+    var description = getIndicoDescription();
+
+    var payload = {
+      'event-creation-category': JSON.stringify({ id: parseInt(categoryId, 10), title: '' }),
+      'event-creation-title': 'RODEM HEP Weekly',
+      'event-creation-occurrences': JSON.stringify([{ date: dateStr, time: '15:00', duration: 80 }]),
+      'event-creation-timezone': 'Europe/Zurich',
+      'event-creation-protection_mode': 'inheriting',
+      'event-creation-description': description,
+      'event-creation-create_booking': 'false',
+      'event-creation-location_data': JSON.stringify({ room_name: roomName, inheriting: false }),
+      'event-creation-person_link_data': JSON.stringify([{ name: presenterName }]),
+      'event-creation-theme': ''
+    };
+
+    var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting', {
+      method: 'post',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'X-Requested-With': 'xmlhttprequest'
+      },
+      payload: payload,
+      muteHttpExceptions: true,
+      followRedirects: false
+    });
+
+    var code = res.getResponseCode();
+    var body = res.getContentText();
+
+    clearIndicoCache();
+
+    // Log for debugging during initial setup
+    logAction(getSpreadsheet(), 'indicoCreate', 'Created event for ' + dateStr + ' (HTTP ' + code + ')');
+
+    // Try to extract URL from response (may be JSON with url field, or a redirect)
+    try {
+      var json = JSON.parse(body);
+      if (json.url) return json.url;
+    } catch (e) {}
+
+    // Check redirect location
+    var headers = res.getHeaders();
+    if (headers && headers['Location']) return headers['Location'];
+
+    return '';
+  } catch (e) {
+    indicoFailureNotification('create', dateStr, e.message);
+    return '';
+  }
+}
+
+/**
+ * Delete an Indico event for a given date.
+ * No-op if no event exists. Never throws.
+ */
+function deleteIndicoEvent(dateStr) {
+  var token = getIndicoApiToken();
+  if (!token) return;
+
+  var url = findIndicoUrlForDate(dateStr);
+  if (!url) return;
+
+  var eventId = extractIndicoEventId(url);
+  if (!eventId) return;
+
+  try {
+    var baseUrl = getIndicoBaseUrl();
+
+    UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/delete', {
+      method: 'post',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'X-Requested-With': 'xmlhttprequest'
+      },
+      payload: { 'confirm_delete': 'true' },
+      muteHttpExceptions: true,
+      followRedirects: false
+    });
+
+    clearIndicoCache();
+    logAction(getSpreadsheet(), 'indicoDelete', 'Deleted event for ' + dateStr + ' (event ' + eventId + ')');
+  } catch (e) {
+    indicoFailureNotification('delete', dateStr, e.message);
+  }
+}
+
+/**
+ * Update the chairperson/person link on an existing Indico event.
+ * If no event exists, creates one instead. Never throws.
+ */
+function updateIndicoChairperson(dateStr, newPresenterName) {
+  var token = getIndicoApiToken();
+  if (!token) return;
+
+  var url = findIndicoUrlForDate(dateStr);
+  if (!url) {
+    createIndicoEvent(dateStr, newPresenterName);
+    return;
+  }
+
+  var eventId = extractIndicoEventId(url);
+  if (!eventId) return;
+
+  try {
+    var baseUrl = getIndicoBaseUrl();
+
+    // Attempt to update chairpersons via the management settings endpoint
+    UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/', {
+      method: 'post',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'X-Requested-With': 'xmlhttprequest'
+      },
+      payload: {
+        'person_link_data': JSON.stringify([{ name: newPresenterName }])
+      },
+      muteHttpExceptions: true,
+      followRedirects: false
+    });
+
+    clearIndicoCache();
+    logAction(getSpreadsheet(), 'indicoUpdate', 'Updated chairperson for ' + dateStr + ' to ' + newPresenterName);
+  } catch (e) {
+    indicoFailureNotification('update', dateStr, e.message);
+  }
+}
+
+/**
+ * Bulk-create Indico events for a new semester schedule.
+ * Skips holidays, buffers, and dates with existing events.
+ * Never throws.
+ */
+function bulkCreateIndicoEvents(scheduleRows) {
+  var token = getIndicoApiToken();
+  if (!token) return;
+
+  var created = 0;
+  var total = 0;
+
+  for (var i = 0; i < scheduleRows.length; i++) {
+    var entry = scheduleRows[i];
+    var status = entry.status || '';
+    var presenter = entry.presenter || '';
+    var date = entry.date || '';
+
+    if (!date || !presenter || status === 'Holiday' || status === 'Buffer') continue;
+    total++;
+
+    // Skip if event already exists
+    if (findIndicoUrlForDate(date)) continue;
+
+    try {
+      createIndicoEvent(date, presenter);
+      created++;
+    } catch (e) {
+      indicoFailureNotification('bulk-create', date, e.message);
+    }
+
+    // Rate limiting
+    Utilities.sleep(500);
+  }
+
+  logAction(getSpreadsheet(), 'indicoBulkCreate', 'Created ' + created + '/' + total + ' Indico events for semester');
+}
+
+/**
+ * Test function — run manually from Apps Script editor to verify Indico event creation.
+ * Creates a test event for a date far in the future, then logs the result.
+ */
+function testIndicoCreate() {
+  var url = createIndicoEvent('2026-12-28', 'Test Person');
+  Logger.log('Created event URL: ' + url);
+  Logger.log('Check your Indico category for a "RODEM HEP Weekly" event on 2026-12-28');
+}
+
+// ============================================================
 // HTTP Handlers
 // ============================================================
 
@@ -450,6 +686,10 @@ function handleVolunteer(body) {
   }
   logAction(ss, 'volunteer', logMsg);
 
+  // Auto-create/update Indico event
+  try { createIndicoEvent(targetDate, body.name); }
+  catch (e) { indicoFailureNotification('create', targetDate, e.message); }
+
   return { success: true, reversedCancellation: reversedCancellation };
 }
 
@@ -516,6 +756,15 @@ function handleOptOut(body) {
   if (movedToBuffer) logMsg += ' (moved to buffer: ' + movedToBuffer + ')';
   if (autoAssigned) logMsg += ' (auto-assigned: ' + autoAssigned + ')';
   logAction(ss, 'optOut', logMsg);
+
+  // Auto-update/delete Indico event
+  try {
+    if (autoAssigned) {
+      updateIndicoChairperson(targetDate, autoAssigned);
+    } else if (remaining.length === 0) {
+      deleteIndicoEvent(targetDate);
+    }
+  } catch (e) { indicoFailureNotification('update', targetDate, e.message); }
 
   return { success: true, movedToBuffer: movedToBuffer, autoAssigned: autoAssigned };
 }
@@ -587,6 +836,12 @@ function handleEmergencyCancel(body) {
   if (movedToBuffer) logMsg += ' (moved to buffer: ' + movedToBuffer + ')';
   logAction(ss, 'emergencyCancel', logMsg);
 
+  // Auto-delete Indico event
+  if (remaining.length === 0) {
+    try { deleteIndicoEvent(targetDate); }
+    catch (e) { indicoFailureNotification('delete', targetDate, e.message); }
+  }
+
   return { success: true, movedToBuffer: movedToBuffer };
 }
 
@@ -615,6 +870,12 @@ function handleSwap(body) {
   sheet.getRange(row2, presCol + 1).setValue(newPres2);
 
   logAction(ss, 'swap', body.member1 + ' (' + body.date1 + ') <-> ' + body.member2 + ' (' + body.date2 + ')');
+
+  // Auto-update Indico events for both dates
+  try {
+    updateIndicoChairperson(body.date1, body.member2);
+    updateIndicoChairperson(body.date2, body.member1);
+  } catch (e) { indicoFailureNotification('update', body.date1 + '/' + body.date2, e.message); }
 
   return { success: true };
 }
@@ -649,6 +910,10 @@ function handleAssignRandom(body) {
   sheet.getRange(rowIndex, statusCol + 1).setValue('TBD');
 
   logAction(ss, 'assignRandom', body.name + ' randomly assigned to ' + targetDate);
+
+  // Auto-create/update Indico event
+  try { createIndicoEvent(targetDate, body.name); }
+  catch (e) { indicoFailureNotification('create', targetDate, e.message); }
 
   return { success: true };
 }
@@ -745,6 +1010,10 @@ function handleArchiveAndSave(body) {
 
   logAction(ss, 'archiveAndSave', 'Archived ' + semesterLabel + ', saved new schedule (' + newSchedule.length + ' weeks)');
 
+  // Bulk-create Indico events for the new semester
+  try { bulkCreateIndicoEvents(newSchedule); }
+  catch (e) { indicoFailureNotification('bulk-create', 'semester', e.message); }
+
   return { success: true };
 }
 
@@ -792,6 +1061,10 @@ function checkSaturdayCancellation() {
         try {
           notifyChannelAnnouncement(mondayStr, '', '', '', 'Cancelled', '');
         } catch (e) { /* logged inside notifyChannelAnnouncement */ }
+
+        // Auto-delete Indico event
+        try { deleteIndicoEvent(mondayStr); }
+        catch (e) { /* logged inside deleteIndicoEvent */ }
       }
       break;
     }

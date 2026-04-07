@@ -158,6 +158,21 @@ If your group uses Indico for event management, the backend fetches events serve
 
 Events from the next 90 days are fetched server-side, cached for 1 hour, and included in the API response. Matching dates show `[Indico]` links automatically. If Indico is unreachable, links simply don't appear.
 
+### Automatic Event Creation
+
+Indico events are auto-created/updated/deleted when the schedule changes:
+- **Volunteer**, **Random Assign**: creates a new Indico event (or updates chairperson if one exists)
+- **Opt-Out** (with auto-assign): updates the event's chairperson to the replacement
+- **Swap**: updates chairpersons on both events
+- **Emergency Cancel**, **Saturday Auto-Cancel**: deletes the Indico event
+- **New Semester**: bulk-creates events for all scheduled dates
+
+To enable, add two additional Script Properties:
+- `INDICO_ROOM_NAME`: room name (e.g. `AEM 026`)
+- `INDICO_DESCRIPTION`: fixed event description (e.g. Zoom info)
+
+If auto-creation fails, a warning is posted to Slack — create the event manually. To test, run `testIndicoCreate()` from the Apps Script editor.
+
 ## 10. Optional: Slack Integration
 
 ### Channel Notifications (Incoming Webhook)

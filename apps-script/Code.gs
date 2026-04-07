@@ -15,7 +15,8 @@
  *   SLACK_WEBHOOK_URL   — Slack incoming webhook for #physics-general (optional)
  *   SLACK_BOT_TOKEN     — Slack bot token with chat:write scope (optional)
  *   INDICO_API_TOKEN    — Indico personal API token with read scope (optional)
- *   INDICO_SESSION      — Indico session cookie for web UI auth (event create/delete/update)
+ *   INDICO_USERNAME     — Indico login username for web UI auth (event create/delete/update)
+ *   INDICO_PASSWORD     — Indico login password
  *   INDICO_BASE_URL     — Indico instance URL (default: https://partphys-indico.unige.ch)
  *   INDICO_CATEGORY_ID  — Indico category ID (default: 19)
  *   INDICO_ROOM_NAME    — Room name for auto-created events (default: AEM 026)
@@ -48,8 +49,89 @@ function getIndicoApiToken() {
   return PropertiesService.getScriptProperties().getProperty('INDICO_API_TOKEN') || '';
 }
 
+function getIndicoUsername() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_USERNAME') || '';
+}
+
+function getIndicoPassword() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_PASSWORD') || '';
+}
+
+/**
+ * Extract indico_session cookie from response headers.
+ * Checks both getHeaders() and getAllHeaders() for Set-Cookie.
+ * Returns the session value or ''.
+ */
+function extractSessionCookie(response) {
+  // Try getAllHeaders first (handles multiple Set-Cookie headers)
+  var allHeaders = response.getAllHeaders();
+  if (allHeaders && allHeaders['Set-Cookie']) {
+    var cookies = allHeaders['Set-Cookie'];
+    if (typeof cookies === 'string') cookies = [cookies];
+    for (var i = 0; i < cookies.length; i++) {
+      var m = cookies[i].match(/indico_session=([^;]+)/);
+      if (m) return m[1];
+    }
+  }
+  // Fallback to single header
+  var setCookie = response.getHeaders()['Set-Cookie'] || '';
+  var match = setCookie.match(/indico_session=([^;]+)/);
+  return match ? match[1] : '';
+}
+
+/**
+ * Log in to Indico via the local account login form.
+ * Indico v2.3.5 accepts the all-zeros CSRF token for unauthenticated login.
+ * The key hidden field is _provider=indico.
+ * Returns the indico_session cookie value or '' on failure.
+ */
+function indicoLogin() {
+  var baseUrl = getIndicoBaseUrl();
+  var username = getIndicoUsername();
+  var password = getIndicoPassword();
+  if (!username || !password) return '';
+
+  try {
+    var loginPayload = 'csrf_token=00000000-0000-0000-0000-000000000000'
+      + '&_provider=indico'
+      + '&identifier=' + encodeURIComponent(username)
+      + '&password=' + encodeURIComponent(password);
+
+    var loginRes = UrlFetchApp.fetch(baseUrl + '/login/', {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      payload: loginPayload,
+      muteHttpExceptions: true,
+      followRedirects: false
+    });
+
+    var session = extractSessionCookie(loginRes);
+    if (session) return session;
+
+    logAction(getSpreadsheet(), 'indicoError', 'Login failed — HTTP ' + loginRes.getResponseCode() + ', no session cookie');
+    return '';
+  } catch (e) {
+    logAction(getSpreadsheet(), 'indicoError', 'indicoLogin failed: ' + e.message);
+    return '';
+  }
+}
+
+/**
+ * Get a valid Indico session, using a cached session or logging in fresh.
+ * Sessions are cached for 30 minutes to avoid excessive logins.
+ * Returns the session cookie value or '' if login is not configured/fails.
+ */
 function getIndicoSession() {
-  return PropertiesService.getScriptProperties().getProperty('INDICO_SESSION') || '';
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('indicoSession');
+  if (cached) return cached;
+
+  var session = indicoLogin();
+  if (session) {
+    // Cache for 30 minutes (1800 seconds)
+    cache.put('indicoSession', session, 1800);
+  }
+  return session;
 }
 
 function getIndicoBaseUrl() {
@@ -640,83 +722,58 @@ function bulkCreateIndicoEvents(scheduleRows) {
  * Test function — run manually from Apps Script editor to verify Indico event creation.
  * Creates a test event for a date far in the future, then logs the result.
  */
-function testIndicoCreate() {
+function testIndicoLogin() {
   var baseUrl = getIndicoBaseUrl();
-  var categoryId = getIndicoCategoryId();
-  var session = getIndicoSession();
+  Logger.log('=== Indico Login Test ===');
+  Logger.log('Username: ' + (getIndicoUsername() || '(not set)'));
+  Logger.log('Password: ' + (getIndicoPassword() ? 'set' : '(not set)'));
 
-  Logger.log('=== Indico Create Test ===');
-  Logger.log('Base URL: ' + baseUrl);
-  Logger.log('Category ID: ' + categoryId);
-  Logger.log('Session present: ' + (session ? 'yes (' + session.length + ' chars)' : 'NO — set INDICO_SESSION in Script Properties'));
+  // POST directly with all-zeros CSRF + _provider=indico
+  var loginPayload = 'csrf_token=00000000-0000-0000-0000-000000000000'
+    + '&_provider=indico'
+    + '&identifier=' + encodeURIComponent(getIndicoUsername())
+    + '&password=' + encodeURIComponent(getIndicoPassword());
 
-  // Step 1: Test CSRF token fetch
-  var csrfToken = fetchIndicoCsrfToken(baseUrl, categoryId, session);
-  Logger.log('CSRF token: ' + (csrfToken ? csrfToken.substring(0, 20) + '...' : 'EMPTY — check response below'));
-
-  if (!csrfToken) {
-    try {
-      var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting?category_id=' + categoryId, {
-        method: 'get',
-        headers: { 'Cookie': 'indico_session=' + session },
-        muteHttpExceptions: true,
-        followRedirects: true
-      });
-      Logger.log('Create page HTTP ' + res.getResponseCode());
-      Logger.log('Content-Type: ' + res.getHeaders()['Content-Type']);
-      Logger.log('First 2000 chars: ' + res.getContentText().substring(0, 2000));
-    } catch (e) {
-      Logger.log('Failed to fetch create page: ' + e.message);
-    }
-    return;
-  }
-
-  // Step 2: Raw POST to capture full response for debugging
-  var ddmmyyyy = formatDateDDMMYYYY('2026-12-28');
-  var catId = parseInt(categoryId, 10);
-  var roomName = getIndicoRoomName();
-  var locationData = {address: '', inheriting: false};
-  if (roomName) locationData.room_name = roomName;
-
-  var payload = 'event-creation-csrf_token=' + encodeURIComponent(csrfToken)
-    + '&event-creation-create_booking=false'
-    + '&event-creation-category=' + encodeURIComponent(JSON.stringify({id: catId, title: 'General'}))
-    + '&event-creation-title=' + encodeURIComponent('RODEM HEP Weekly')
-    + '&event-creation-start_dt=' + encodeURIComponent(ddmmyyyy)
-    + '&event-creation-start_dt=' + encodeURIComponent('15:00')
-    + '&event-creation-end_dt=' + encodeURIComponent(ddmmyyyy)
-    + '&event-creation-end_dt=' + encodeURIComponent('16:20')
-    + '&event-creation-timezone=' + encodeURIComponent('Europe/Zurich')
-    + '&event-creation-location_data=' + encodeURIComponent(JSON.stringify(locationData))
-    + '&event-creation-protection_mode=inheriting';
-
-  Logger.log('Location data: ' + JSON.stringify(locationData));
-  Logger.log('Room name from config: ' + roomName);
-
-  var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting', {
+  var loginRes = UrlFetchApp.fetch(baseUrl + '/login/', {
     method: 'post',
     contentType: 'application/x-www-form-urlencoded',
-    headers: {
-      'Cookie': 'indico_session=' + session,
-      'X-Requested-With': 'XMLHttpRequest'
-    },
-    payload: payload,
+    payload: loginPayload,
     muteHttpExceptions: true,
     followRedirects: false
   });
 
-  var code = res.getResponseCode();
-  var body = res.getContentText();
-  var headers = res.getHeaders();
+  Logger.log('POST /login/ HTTP ' + loginRes.getResponseCode());
+  Logger.log('Location: ' + (loginRes.getHeaders()['Location'] || '(none)'));
+  Logger.log('Set-Cookie: ' + JSON.stringify(loginRes.getAllHeaders()['Set-Cookie']));
 
-  Logger.log('POST HTTP ' + code);
-  Logger.log('Response headers: ' + JSON.stringify(headers));
-  Logger.log('Response body (first 2000): ' + body.substring(0, 2000));
+  var session = extractSessionCookie(loginRes);
+  if (session) {
+    Logger.log('Session: ' + session.substring(0, 20) + '... (' + session.length + ' chars)');
+    Logger.log('SUCCESS');
 
-  // Step 3: Test fallback URL lookup
-  clearIndicoCache();
-  var eventUrl = findIndicoUrlForDate('2026-12-28');
-  Logger.log('Fallback URL lookup: ' + (eventUrl || '(not found — event may be >90 days out)'));
+    // Verify the session works
+    var categoryId = getIndicoCategoryId();
+    var csrfToken = fetchIndicoCsrfToken(baseUrl, categoryId, session);
+    Logger.log('Create page CSRF: ' + (csrfToken ? csrfToken.substring(0, 20) + '...' : 'EMPTY'));
+  } else {
+    Logger.log('FAILED — no session cookie');
+    Logger.log('Response body (first 2000): ' + loginRes.getContentText().substring(0, 2000));
+  }
+}
+
+function testIndicoCreate() {
+  Logger.log('=== Indico Create Test ===');
+
+  var session = getIndicoSession();
+  if (!session) {
+    Logger.log('No session — run testIndicoLogin() first to debug');
+    return;
+  }
+  Logger.log('Session: OK');
+
+  var url = createIndicoEvent('2026-12-28', 'Test Person');
+  Logger.log('Created event URL: ' + (url || '(empty)'));
+  Logger.log('Check your Indico category for a "RODEM HEP Weekly" event on 2026-12-28');
 }
 
 // ============================================================

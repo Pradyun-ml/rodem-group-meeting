@@ -15,6 +15,7 @@
  *   SLACK_WEBHOOK_URL   — Slack incoming webhook for #physics-general (optional)
  *   SLACK_BOT_TOKEN     — Slack bot token with chat:write scope (optional)
  *   INDICO_API_TOKEN    — Indico personal API token with read scope (optional)
+ *   INDICO_SESSION      — Indico session cookie for web UI auth (event create/delete/update)
  *   INDICO_BASE_URL     — Indico instance URL (default: https://partphys-indico.unige.ch)
  *   INDICO_CATEGORY_ID  — Indico category ID (default: 19)
  *   INDICO_ROOM_NAME    — Room name for auto-created events (default: AEM 026)
@@ -45,6 +46,10 @@ function getSlackBotToken() {
 
 function getIndicoApiToken() {
   return PropertiesService.getScriptProperties().getProperty('INDICO_API_TOKEN') || '';
+}
+
+function getIndicoSession() {
+  return PropertiesService.getScriptProperties().getProperty('INDICO_SESSION') || '';
 }
 
 function getIndicoBaseUrl() {
@@ -319,13 +324,106 @@ function indicoFailureNotification(action, dateStr, errorMsg) {
 }
 
 /**
- * Create an Indico meeting event via form POST.
+ * Convert YYYY-MM-DD to DD/MM/YYYY for Indico v2.3.5 form fields.
+ */
+function formatDateDDMMYYYY(dateStr) {
+  var parts = dateStr.split('-');
+  return parts[2] + '/' + parts[1] + '/' + parts[0];
+}
+
+/**
+ * Fetch a CSRF token from the Indico event creation page.
+ * Uses session cookie auth. Response may be JSON (AJAX) or HTML.
+ * Returns the token string or '' if not found.
+ */
+function fetchIndicoCsrfToken(baseUrl, categoryId, session) {
+  try {
+    var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting?category_id=' + categoryId, {
+      method: 'get',
+      headers: {
+        'Cookie': 'indico_session=' + session
+      },
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+
+    var body = res.getContentText();
+
+    // Try JSON response first (Indico returns JSON for AJAX-style requests)
+    try {
+      var json = JSON.parse(body);
+      if (json.csrf_token) return json.csrf_token;
+      // Some Indico versions nest it in the HTML field
+      if (json.html) {
+        var htmlMatch = json.html.match(/name="event-creation-csrf_token"\s+[^>]*value="([^"]+)"/);
+        if (htmlMatch) return htmlMatch[1];
+        htmlMatch = json.html.match(/value="([^"]+)"\s+[^>]*name="event-creation-csrf_token"/);
+        if (htmlMatch) return htmlMatch[1];
+      }
+    } catch (e) {}
+
+    // Fallback: HTML response — extract from meta tag or form field
+    var match = body.match(/name="csrf-token"[^>]*content="([^"]+)"/);
+    if (match && match[1] !== '00000000-0000-0000-0000-000000000000') return match[1];
+    match = body.match(/name="event-creation-csrf_token"\s+[^>]*value="([^"]+)"/);
+    if (match) return match[1];
+    match = body.match(/value="([^"]+)"\s+[^>]*name="event-creation-csrf_token"/);
+    if (match) return match[1];
+
+    return '';
+  } catch (e) {
+    logAction(getSpreadsheet(), 'indicoError', 'CSRF token fetch failed: ' + e.message);
+    return '';
+  }
+}
+
+/**
+ * Fetch a CSRF token from the Indico event management page.
+ * Used for delete and update operations on existing events.
+ * Returns the token string or '' if not found.
+ */
+function fetchIndicoManageCsrfToken(baseUrl, path, session) {
+  try {
+    var res = UrlFetchApp.fetch(baseUrl + path, {
+      method: 'get',
+      headers: {
+        'Cookie': 'indico_session=' + session
+      },
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+
+    var body = res.getContentText();
+
+    // Try JSON response first
+    try {
+      var json = JSON.parse(body);
+      if (json.csrf_token) return json.csrf_token;
+    } catch (e) {}
+
+    // Fallback: HTML — meta tag or form field
+    var match = body.match(/name="csrf-token"[^>]*content="([^"]+)"/);
+    if (match && match[1] !== '00000000-0000-0000-0000-000000000000') return match[1];
+    match = body.match(/name="csrf_token"\s+[^>]*value="([^"]+)"/);
+    if (match) return match[1];
+    match = body.match(/value="([^"]+)"\s+[^>]*name="csrf_token"/);
+    if (match) return match[1];
+
+    return '';
+  } catch (e) {
+    logAction(getSpreadsheet(), 'indicoError', 'Manage CSRF token fetch failed: ' + e.message);
+    return '';
+  }
+}
+
+/**
+ * Create an Indico meeting event via form POST (v2.3.5 compatible).
  * If an event already exists for this date, updates the chairperson instead.
  * Returns the new event URL or '' on failure. Never throws.
  */
 function createIndicoEvent(dateStr, presenterName) {
-  var token = getIndicoApiToken();
-  if (!token) return '';
+  var session = getIndicoSession();
+  if (!session) return '';
 
   // If event already exists, update instead
   var existing = findIndicoUrlForDate(dateStr);
@@ -337,27 +435,36 @@ function createIndicoEvent(dateStr, presenterName) {
   try {
     var baseUrl = getIndicoBaseUrl();
     var categoryId = getIndicoCategoryId();
-    var roomName = getIndicoRoomName();
-    var description = getIndicoDescription();
+    var catId = parseInt(categoryId, 10);
 
-    var payload = {
-      'event-creation-category': JSON.stringify({ id: parseInt(categoryId, 10), title: '' }),
-      'event-creation-title': 'RODEM HEP Weekly',
-      'event-creation-occurrences': JSON.stringify([{ date: dateStr, time: '15:00', duration: 80 }]),
-      'event-creation-timezone': 'Europe/Zurich',
-      'event-creation-protection_mode': 'inheriting',
-      'event-creation-description': description,
-      'event-creation-create_booking': 'false',
-      'event-creation-location_data': JSON.stringify({ room_name: roomName, inheriting: false }),
-      'event-creation-person_link_data': JSON.stringify([{ name: presenterName }]),
-      'event-creation-theme': ''
-    };
+    // Step 1: Fetch CSRF token from the create-meeting form page
+    var csrfToken = fetchIndicoCsrfToken(baseUrl, categoryId, session);
+
+    // Step 2: Build URL-encoded payload with duplicate keys for start_dt/end_dt
+    var ddmmyyyy = formatDateDDMMYYYY(dateStr);
+
+    var roomName = getIndicoRoomName();
+    var locationData = {address: '', inheriting: false};
+    if (roomName) locationData.room_name = roomName;
+
+    var payload = 'event-creation-csrf_token=' + encodeURIComponent(csrfToken)
+      + '&event-creation-create_booking=false'
+      + '&event-creation-category=' + encodeURIComponent(JSON.stringify({id: catId, title: 'General'}))
+      + '&event-creation-title=' + encodeURIComponent('RODEM HEP Weekly')
+      + '&event-creation-start_dt=' + encodeURIComponent(ddmmyyyy)
+      + '&event-creation-start_dt=' + encodeURIComponent('15:00')
+      + '&event-creation-end_dt=' + encodeURIComponent(ddmmyyyy)
+      + '&event-creation-end_dt=' + encodeURIComponent('16:20')
+      + '&event-creation-timezone=' + encodeURIComponent('Europe/Zurich')
+      + '&event-creation-location_data=' + encodeURIComponent(JSON.stringify(locationData))
+      + '&event-creation-protection_mode=inheriting';
 
     var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting', {
       method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
       headers: {
-        'Authorization': 'Bearer ' + token,
-        'X-Requested-With': 'xmlhttprequest'
+        'Cookie': 'indico_session=' + session,
+        'X-Requested-With': 'XMLHttpRequest'
       },
       payload: payload,
       muteHttpExceptions: true,
@@ -369,18 +476,33 @@ function createIndicoEvent(dateStr, presenterName) {
 
     clearIndicoCache();
 
-    // Log for debugging during initial setup
     logAction(getSpreadsheet(), 'indicoCreate', 'Created event for ' + dateStr + ' (HTTP ' + code + ')');
 
-    // Try to extract URL from response (may be JSON with url field, or a redirect)
+    // Try to extract URL from JSON response
     try {
       var json = JSON.parse(body);
-      if (json.url) return json.url;
+      // Response is e.g. {"redirect":"/event/2091/manage/","success":true}
+      var rawUrl = json.url || json.redirect || '';
+      if (rawUrl) {
+        // Strip /manage/ suffix to get the public event URL
+        rawUrl = rawUrl.replace(/\/manage\/?$/, '/');
+        // Prepend base URL if relative
+        if (rawUrl.charAt(0) === '/') rawUrl = baseUrl + rawUrl;
+        return rawUrl;
+      }
     } catch (e) {}
 
-    // Check redirect location
-    var headers = res.getHeaders();
-    if (headers && headers['Location']) return headers['Location'];
+    // Check redirect location header
+    var resHeaders = res.getHeaders();
+    if (resHeaders && resHeaders['Location']) {
+      var loc = resHeaders['Location'];
+      if (loc.charAt(0) === '/') loc = baseUrl + loc;
+      return loc.replace(/\/manage\/?$/, '/');
+    }
+
+    // Fallback: look up the newly created event from the category
+    var eventUrl = findIndicoUrlForDate(dateStr);
+    if (eventUrl) return eventUrl;
 
     return '';
   } catch (e) {
@@ -394,8 +516,8 @@ function createIndicoEvent(dateStr, presenterName) {
  * No-op if no event exists. Never throws.
  */
 function deleteIndicoEvent(dateStr) {
-  var token = getIndicoApiToken();
-  if (!token) return;
+  var session = getIndicoSession();
+  if (!session) return;
 
   var url = findIndicoUrlForDate(dateStr);
   if (!url) return;
@@ -406,13 +528,20 @@ function deleteIndicoEvent(dateStr) {
   try {
     var baseUrl = getIndicoBaseUrl();
 
+    // Fetch CSRF token from the delete confirmation page
+    var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/delete', session);
+
+    var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
+      + '&confirm_delete=true';
+
     UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/delete', {
       method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
       headers: {
-        'Authorization': 'Bearer ' + token,
-        'X-Requested-With': 'xmlhttprequest'
+        'Cookie': 'indico_session=' + session,
+        'X-Requested-With': 'XMLHttpRequest'
       },
-      payload: { 'confirm_delete': 'true' },
+      payload: payload,
       muteHttpExceptions: true,
       followRedirects: false
     });
@@ -429,8 +558,8 @@ function deleteIndicoEvent(dateStr) {
  * If no event exists, creates one instead. Never throws.
  */
 function updateIndicoChairperson(dateStr, newPresenterName) {
-  var token = getIndicoApiToken();
-  if (!token) return;
+  var session = getIndicoSession();
+  if (!session) return;
 
   var url = findIndicoUrlForDate(dateStr);
   if (!url) {
@@ -444,16 +573,20 @@ function updateIndicoChairperson(dateStr, newPresenterName) {
   try {
     var baseUrl = getIndicoBaseUrl();
 
-    // Attempt to update chairpersons via the management settings endpoint
+    // Fetch CSRF token from the event management page
+    var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
+
+    var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
+      + '&person_link_data=' + encodeURIComponent(JSON.stringify([{name: newPresenterName}]));
+
     UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/', {
       method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
       headers: {
-        'Authorization': 'Bearer ' + token,
-        'X-Requested-With': 'xmlhttprequest'
+        'Cookie': 'indico_session=' + session,
+        'X-Requested-With': 'XMLHttpRequest'
       },
-      payload: {
-        'person_link_data': JSON.stringify([{ name: newPresenterName }])
-      },
+      payload: payload,
       muteHttpExceptions: true,
       followRedirects: false
     });
@@ -471,8 +604,8 @@ function updateIndicoChairperson(dateStr, newPresenterName) {
  * Never throws.
  */
 function bulkCreateIndicoEvents(scheduleRows) {
-  var token = getIndicoApiToken();
-  if (!token) return;
+  var session = getIndicoSession();
+  if (!session) return;
 
   var created = 0;
   var total = 0;
@@ -508,9 +641,82 @@ function bulkCreateIndicoEvents(scheduleRows) {
  * Creates a test event for a date far in the future, then logs the result.
  */
 function testIndicoCreate() {
-  var url = createIndicoEvent('2026-12-28', 'Test Person');
-  Logger.log('Created event URL: ' + url);
-  Logger.log('Check your Indico category for a "RODEM HEP Weekly" event on 2026-12-28');
+  var baseUrl = getIndicoBaseUrl();
+  var categoryId = getIndicoCategoryId();
+  var session = getIndicoSession();
+
+  Logger.log('=== Indico Create Test ===');
+  Logger.log('Base URL: ' + baseUrl);
+  Logger.log('Category ID: ' + categoryId);
+  Logger.log('Session present: ' + (session ? 'yes (' + session.length + ' chars)' : 'NO — set INDICO_SESSION in Script Properties'));
+
+  // Step 1: Test CSRF token fetch
+  var csrfToken = fetchIndicoCsrfToken(baseUrl, categoryId, session);
+  Logger.log('CSRF token: ' + (csrfToken ? csrfToken.substring(0, 20) + '...' : 'EMPTY — check response below'));
+
+  if (!csrfToken) {
+    try {
+      var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting?category_id=' + categoryId, {
+        method: 'get',
+        headers: { 'Cookie': 'indico_session=' + session },
+        muteHttpExceptions: true,
+        followRedirects: true
+      });
+      Logger.log('Create page HTTP ' + res.getResponseCode());
+      Logger.log('Content-Type: ' + res.getHeaders()['Content-Type']);
+      Logger.log('First 2000 chars: ' + res.getContentText().substring(0, 2000));
+    } catch (e) {
+      Logger.log('Failed to fetch create page: ' + e.message);
+    }
+    return;
+  }
+
+  // Step 2: Raw POST to capture full response for debugging
+  var ddmmyyyy = formatDateDDMMYYYY('2026-12-28');
+  var catId = parseInt(categoryId, 10);
+  var roomName = getIndicoRoomName();
+  var locationData = {address: '', inheriting: false};
+  if (roomName) locationData.room_name = roomName;
+
+  var payload = 'event-creation-csrf_token=' + encodeURIComponent(csrfToken)
+    + '&event-creation-create_booking=false'
+    + '&event-creation-category=' + encodeURIComponent(JSON.stringify({id: catId, title: 'General'}))
+    + '&event-creation-title=' + encodeURIComponent('RODEM HEP Weekly')
+    + '&event-creation-start_dt=' + encodeURIComponent(ddmmyyyy)
+    + '&event-creation-start_dt=' + encodeURIComponent('15:00')
+    + '&event-creation-end_dt=' + encodeURIComponent(ddmmyyyy)
+    + '&event-creation-end_dt=' + encodeURIComponent('16:20')
+    + '&event-creation-timezone=' + encodeURIComponent('Europe/Zurich')
+    + '&event-creation-location_data=' + encodeURIComponent(JSON.stringify(locationData))
+    + '&event-creation-protection_mode=inheriting';
+
+  Logger.log('Location data: ' + JSON.stringify(locationData));
+  Logger.log('Room name from config: ' + roomName);
+
+  var res = UrlFetchApp.fetch(baseUrl + '/event/create/meeting', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: {
+      'Cookie': 'indico_session=' + session,
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    payload: payload,
+    muteHttpExceptions: true,
+    followRedirects: false
+  });
+
+  var code = res.getResponseCode();
+  var body = res.getContentText();
+  var headers = res.getHeaders();
+
+  Logger.log('POST HTTP ' + code);
+  Logger.log('Response headers: ' + JSON.stringify(headers));
+  Logger.log('Response body (first 2000): ' + body.substring(0, 2000));
+
+  // Step 3: Test fallback URL lookup
+  clearIndicoCache();
+  var eventUrl = findIndicoUrlForDate('2026-12-28');
+  Logger.log('Fallback URL lookup: ' + (eventUrl || '(not found — event may be >90 days out)'));
 }
 
 // ============================================================

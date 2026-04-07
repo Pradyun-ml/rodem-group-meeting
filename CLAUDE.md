@@ -45,7 +45,8 @@ No build step. Open `index.html` in a browser. Works without a backend configure
 - `checkSaturdayCancellation()` marks empty Monday slots as Cancelled on Saturday night
 - Schedule generation runs client-side in `Scheduler.generateSchedule()`, then saves via `archiveAndSave` action
 - `js/config.js` contains the shared secret — committed to repo (low-sensitivity group tool)
-- Slack/Indico credentials stored in Apps Script **Script Properties** (SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, INDICO_API_TOKEN, INDICO_BASE_URL, INDICO_CATEGORY_ID)
+- Slack/Indico credentials stored in Apps Script **Script Properties** (SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, INDICO_API_TOKEN, INDICO_SESSION, INDICO_BASE_URL, INDICO_CATEGORY_ID)
+- INDICO_API_TOKEN is used for read-only export API; INDICO_SESSION (session cookie) is used for web UI actions (create/delete/update events)
 - Members sheet has a `SlackUserID` column for DM targeting; empty = no DMs for that member
 - Indico events fetched server-side with `CacheService` (1-hour TTL), included in `doGet` response
 - All Slack/Indico calls are fire-and-forget: wrapped in try/catch, failures logged to Log sheet, never break core actions

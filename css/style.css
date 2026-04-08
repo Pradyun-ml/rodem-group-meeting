@@ -1,5 +1,6 @@
 /* Group Meeting Scheduler — Custom Styles */
 
+/* ===== Theme Variables ===== */
 :root {
   --status-confirmed: #22c55e;
   --status-volunteered: #3b82f6;
@@ -14,32 +15,87 @@
   --cancelled-week-bg: #fff7ed;
   --past-week-opacity: 0.55;
   --bar-bg: #e2e8f0;
+  --dot-color: rgba(0, 0, 0, 0.06);
+  --bg-gradient-start: #f0f4ff;
+  --bg-gradient-end: #faf5ff;
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-border: rgba(0, 0, 0, 0.06);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --row-hover-bg: rgba(59, 130, 246, 0.04);
 }
 
+/* Dark variables for explicit dark mode */
+[data-theme="dark"] {
+  --current-week-bg: #422006;
+  --holiday-week-bg: #1f2937;
+  --buffer-week-bg: #1e1b4b;
+  --cancelled-week-bg: #431407;
+  --bar-bg: #334155;
+  --dot-color: rgba(255, 255, 255, 0.04);
+  --bg-gradient-start: #0c1222;
+  --bg-gradient-end: #120c22;
+  --card-bg: rgba(30, 41, 59, 0.5);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
+  --row-hover-bg: rgba(59, 130, 246, 0.08);
+}
+
+/* Dark variables when auto follows OS preference */
 @media (prefers-color-scheme: dark) {
-  :root {
+  [data-theme="auto"] {
     --current-week-bg: #422006;
     --holiday-week-bg: #1f2937;
     --buffer-week-bg: #1e1b4b;
     --cancelled-week-bg: #431407;
     --bar-bg: #334155;
+    --dot-color: rgba(255, 255, 255, 0.04);
+    --bg-gradient-start: #0c1222;
+    --bg-gradient-end: #120c22;
+    --card-bg: rgba(30, 41, 59, 0.5);
+    --card-border: rgba(255, 255, 255, 0.06);
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
+    --row-hover-bg: rgba(59, 130, 246, 0.08);
   }
 }
 
-/* Layout */
+/* ===== Background ===== */
+html {
+  background: linear-gradient(180deg, var(--bg-gradient-start), var(--bg-gradient-end));
+  min-height: 100%;
+}
+
 body {
   max-width: 1100px;
   margin: 0 auto;
   padding: 1rem;
+  background-image: radial-gradient(var(--dot-color) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-attachment: fixed;
+  animation: fadeInUp 0.4s ease-out;
 }
 
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Header ===== */
 header {
+  position: relative;
   text-align: center;
   margin-bottom: 1.5rem;
+  padding: 1.5rem 1rem;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(139, 92, 246, 0.06));
+  border-radius: 1rem;
 }
 
 header h1 {
   margin-bottom: 0.25rem;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #3b82f6; /* fallback */
 }
 
 header p {
@@ -47,7 +103,74 @@ header p {
   opacity: 0.7;
 }
 
-/* Action buttons row */
+/* ===== Theme Toggle ===== */
+.theme-toggle {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 0.5rem;
+  background: var(--card-bg);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+  color: inherit;
+}
+
+.theme-toggle:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.theme-toggle:active {
+  transform: scale(0.95);
+}
+
+/* ===== Card-style sections ===== */
+.table-card {
+  overflow-x: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--card-shadow);
+  padding: 0.25rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.organizer-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-top: none;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.archive-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-top: none;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ===== Action buttons row ===== */
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -59,9 +182,20 @@ header p {
 .actions button {
   margin: 0;
   white-space: nowrap;
+  transition: transform 0.12s, box-shadow 0.12s;
 }
 
-/* Schedule table */
+.actions button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.actions button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ===== Schedule table ===== */
 .schedule-table {
   width: 100%;
   border-collapse: collapse;
@@ -89,7 +223,13 @@ header p {
   text-align: center;
 }
 
-/* Row states */
+/* Table row hover */
+.schedule-table tbody tr:not(.holiday-week):not(.buffer-week):not(.cancelled-week):not(.past-week):hover {
+  background: var(--row-hover-bg);
+  transition: background 0.15s;
+}
+
+/* ===== Row states ===== */
 .past-week {
   opacity: var(--past-week-opacity);
 }
@@ -124,7 +264,7 @@ header p {
   background: var(--cancelled-week-bg);
 }
 
-/* Status badges */
+/* ===== Status badges ===== */
 .status-badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -170,14 +310,48 @@ header p {
   color: #fff;
 }
 
-/* Indico link */
+/* Current-week badge pulse — color matches the badge */
+.current-week .status-badge {
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+.current-week .status-tbd {
+  --pulse-color: var(--status-tbd);
+}
+
+.current-week .status-confirmed {
+  --pulse-color: var(--status-confirmed);
+}
+
+.current-week .status-volunteered {
+  --pulse-color: var(--status-volunteered);
+}
+
+.current-week .status-empty {
+  --pulse-color: var(--status-empty);
+}
+
+.current-week .status-cancelled {
+  --pulse-color: var(--status-cancelled);
+}
+
+.current-week .status-buffer {
+  --pulse-color: var(--status-buffer);
+}
+
+@keyframes badgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse-color, #f59e0b) 60%, transparent); }
+  50% { box-shadow: 0 0 12px 6px color-mix(in srgb, var(--pulse-color, #f59e0b) 40%, transparent); }
+}
+
+/* ===== Indico link ===== */
 .indico-link {
   font-size: 0.75rem;
   margin-left: 0.35rem;
   opacity: 0.7;
 }
 
-/* Bottom bar: fairness + emergency cancel */
+/* ===== Bottom bar: fairness + emergency cancel ===== */
 .bottom-bar {
   display: flex;
   justify-content: space-between;
@@ -279,11 +453,13 @@ header p {
   text-align: right;
 }
 
-/* Modals */
+/* ===== Modals ===== */
 .modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -318,7 +494,7 @@ header p {
   margin: 0;
 }
 
-/* Random result highlight */
+/* ===== Random result highlight ===== */
 .random-result {
   text-align: center;
   padding: 1.5rem;
@@ -332,7 +508,7 @@ header p {
   font-weight: 700;
 }
 
-/* Notification toast */
+/* ===== Notification toast ===== */
 .notification {
   position: fixed;
   top: 1rem;
@@ -359,7 +535,7 @@ header p {
   to { transform: translateX(0); opacity: 1; }
 }
 
-/* Swap preview */
+/* ===== Swap preview ===== */
 .swap-preview {
   padding: 0.75rem;
   border-radius: 0.5rem;
@@ -368,7 +544,7 @@ header p {
   font-size: 0.9rem;
 }
 
-/* Poll form — date checklist */
+/* ===== Poll form — date checklist ===== */
 .poll-date-list {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -390,7 +566,7 @@ header p {
   width: auto;
 }
 
-/* Deadline notice */
+/* ===== Deadline notice ===== */
 .deadline-notice {
   padding: 0.5rem 0.75rem;
   border-radius: 0.35rem;
@@ -414,8 +590,7 @@ header p {
   background: rgba(239, 68, 68, 0.08);
 }
 
-/* Archive section */
-/* Emergency cancel link */
+/* ===== Emergency cancel link ===== */
 .emergency-cancel-link {
   font-size: 0.8rem;
   opacity: 0.5;
@@ -429,12 +604,7 @@ header p {
   text-decoration: underline;
 }
 
-.archive-section {
-  margin-top: 2rem;
-  border-top: 1px solid var(--pico-muted-border-color, #e2e8f0);
-  padding-top: 1rem;
-}
-
+/* ===== Archive section ===== */
 .archive-section summary {
   cursor: pointer;
   font-weight: 600;
@@ -445,7 +615,7 @@ header p {
   opacity: 0.8;
 }
 
-/* Generate preview */
+/* ===== Generate preview ===== */
 .generate-preview {
   max-height: 400px;
   overflow-y: auto;
@@ -456,13 +626,7 @@ header p {
   font-size: 0.8rem;
 }
 
-/* Organizer tools section */
-.organizer-section {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
-  border-top: 1px dashed var(--pico-muted-border-color, #e2e8f0);
-}
-
+/* ===== Organizer tools section ===== */
 .organizer-section summary {
   cursor: pointer;
   font-size: 0.85rem;
@@ -481,7 +645,32 @@ header p {
   font-size: 0.85rem;
 }
 
-/* Responsive */
+/* ===== Footer ===== */
+.site-footer {
+  text-align: center;
+  margin-top: 2rem;
+  padding: 1rem;
+  opacity: 0.5;
+  font-size: 0.8rem;
+  border-top: 1px solid var(--card-border);
+}
+
+/* ===== Scroll-reveal (progressive enhancement) ===== */
+@supports (animation-timeline: view()) {
+  .organizer-section,
+  .archive-section {
+    animation: scrollReveal linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 30%;
+  }
+
+  @keyframes scrollReveal {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* ===== Responsive ===== */
 @media (max-width: 768px) {
   .schedule-table {
     font-size: 0.8rem;
@@ -517,26 +706,26 @@ header p {
   }
 }
 
-/* Loading spinner */
+/* ===== Loading spinner ===== */
 .loading-spinner {
   text-align: center;
   padding: 3rem;
   opacity: 0.6;
 }
 
-/* Week number cell */
+/* ===== Week number cell ===== */
 .week-num {
   font-variant-numeric: tabular-nums;
   opacity: 0.5;
   font-size: 0.8rem;
 }
 
-/* Presenter cell */
+/* ===== Presenter cell ===== */
 .presenter-name {
   font-weight: 500;
 }
 
-/* Topic cell */
+/* ===== Topic cell ===== */
 .topic-cell {
   max-width: 200px;
   overflow: hidden;

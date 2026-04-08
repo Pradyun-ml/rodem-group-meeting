@@ -69,8 +69,23 @@ document.addEventListener('alpine:init', () => {
     // Archive
     selectedArchiveSemester: '',
 
+    // Theme
+    darkMode: localStorage.getItem('theme') || 'dark',
+
     async init() {
+      this.applyTheme();
       await this.loadData();
+    },
+
+    applyTheme() {
+      document.documentElement.setAttribute('data-theme', this.darkMode);
+    },
+
+    toggleTheme() {
+      const order = ['dark', 'light', 'auto'];
+      this.darkMode = order[(order.indexOf(this.darkMode) + 1) % 3];
+      localStorage.setItem('theme', this.darkMode);
+      this.applyTheme();
     },
 
     async loadData() {

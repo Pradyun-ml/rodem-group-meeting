@@ -6,6 +6,13 @@
   <title>Group Meeting Schedule</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Prevent theme flash — runs before paint
+    (function() {
+      var t = localStorage.getItem('theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
 </head>
 <body x-data="meetingApp">
 
@@ -16,6 +23,11 @@
 
   <!-- Header -->
   <header>
+    <button class="theme-toggle" @click="toggleTheme()" :title="'Theme: ' + darkMode">
+      <span x-show="darkMode === 'dark'">&#9790;</span>
+      <span x-show="darkMode === 'light'">&#9728;</span>
+      <span x-show="darkMode === 'auto'">&#9681;</span>
+    </button>
     <h1>Group Meeting Schedule</h1>
     <p>Every Monday, 3:00 PM CET &mdash; <span x-text="''+CONFIG.SEMESTER.label"></span></p>
   </header>
@@ -35,7 +47,7 @@
   </div>
 
   <!-- Schedule table -->
-  <div x-show="!loading" style="overflow-x: auto;">
+  <div x-show="!loading" class="table-card">
     <table class="schedule-table">
       <thead>
         <tr>
@@ -488,7 +500,7 @@
   </div>
 
   <!-- Footer -->
-  <footer style="text-align: center; margin-top: 2rem; padding: 1rem; opacity: 0.5; font-size: 0.8rem;">
+  <footer class="site-footer">
     <p>Organized by Pradyun &mdash; <span x-text="members.length"></span> members, <span x-text="schedule.filter(s => s.status !== 'Holiday' && s.status !== 'Buffer').length"></span> presentation weeks</p>
   </footer>
 

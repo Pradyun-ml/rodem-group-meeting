@@ -26,7 +26,7 @@ No build step. Open `index.html` in a browser. Works without a backend configure
 
 ## Deployment
 
-- **Frontend**: Push to `main` → GitHub Pages auto-deploys from root
+- **Frontend**: Push to the GitHub Pages branch (configured in Settings > Pages) → auto-deploys from root
 - **Backend**: Edit Code.gs in Apps Script → **Deploy > New deployment** (required for every code change)
 - **Sheet setup**: Run `setupSheets()` or `resetAndSetupSheets()` from Apps Script editor
 - **Triggers**: Saturday auto-cancel, Monday announcement, daily reminders — all manually created in Apps Script Triggers (see SETUP.md steps 6, 10)
@@ -51,10 +51,27 @@ No build step. Open `index.html` in a browser. Works without a backend configure
 - Indico events fetched server-side with `CacheService` (1-hour TTL), included in `doGet` response
 - All Slack/Indico calls are fire-and-forget: wrapped in try/catch, failures logged to Log sheet, never break core actions
 
+## Theming
+
+- 3-state dark/light/auto toggle: `darkMode` state in `js/app.js`, cycles dark → light → auto
+- `data-theme` attribute on `<html>` drives all theme switching; Pico CSS respects it natively
+- Flash prevention: inline `<script>` in `<head>` reads `localStorage('theme')` and sets `data-theme` before paint
+- Default theme is **dark** (when no localStorage value)
+- Dark-mode CSS variables are duplicated in two selectors: `[data-theme="dark"]` (explicit) and `@media (prefers-color-scheme: dark) { [data-theme="auto"] }` (OS-following) — keep both in sync when changing colors
+- New CSS variables for visual layer: `--dot-color`, `--bg-gradient-start/end`, `--card-bg`, `--card-border`, `--card-shadow`, `--row-hover-bg` (all have light + dark variants)
+- Status badge pulse on current week uses `--pulse-color` CSS variable per status class
+
+## Branches
+
+- `slack-indico-integration-v2` — main working branch with all backend integrations
+- `UI-improvements` — branched from `slack-indico-integration-v2`, adds theming and visual polish
+- `main` — older, simpler version (no poll, archive, organizer tools, emergency cancel, Slack/Indico)
+- GitHub Pages deployment branch is configured in repo Settings > Pages
+
 ## File Roles
 
 - `js/config.js` — configuration: URLs, secret, semester, holidays, buffer count, deadline, members, presentation types. `DATES` computed dynamically from `SEMESTER.start`/`end`. Default schedule generated at runtime by `Scheduler.generateDefaultSchedule()`
 - `js/api.js` — HTTP layer (GET/POST to Apps Script)
-- `js/app.js` — Alpine.js `meetingApp` component: state, form logic, local fallbacks, archive, poll, schedule generation
+- `js/app.js` — Alpine.js `meetingApp` component: state, form logic, local fallbacks, archive, poll, schedule generation, theme toggle
 - `js/scheduler.js` — pure functions: Jain's index, credit computation, weighted random, date utils, schedule generation algorithm
 - `apps-script/Code.gs` — server-side: HTTP handlers, sheet CRUD, buffer auto-assignment, Slack notifications, Indico server-side fetch, time-driven triggers, setup helpers

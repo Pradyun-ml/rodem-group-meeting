@@ -151,7 +151,7 @@ If your group uses Indico for event management, the backend fetches events serve
 
 1. Create an API token at your Indico instance (Profile → API tokens, read scope)
 2. In Apps Script **Project Settings > Script Properties**, add:
-   - `INDICO_API_TOKEN`: your API token
+   - `INDICO_API_TOKEN`: your API token (read-only, for fetching events)
    - `INDICO_BASE_URL`: your Indico instance URL (e.g. `https://partphys-indico.unige.ch`)
    - `INDICO_CATEGORY_ID`: category ID from the URL (e.g. `19`)
 3. Create a **new deployment** for changes to take effect
@@ -167,7 +167,9 @@ Indico events are auto-created/updated/deleted when the schedule changes:
 - **Emergency Cancel**, **Saturday Auto-Cancel**: deletes the Indico event
 - **New Semester**: bulk-creates events for all scheduled dates
 
-To enable, add two additional Script Properties:
+To enable, add these additional Script Properties:
+- `INDICO_USERNAME`: Indico login username (for web UI auth — create/update/delete events)
+- `INDICO_PASSWORD`: Indico login password (session cached 30 min to avoid excessive logins)
 - `INDICO_ROOM_NAME`: room name (e.g. `AEM 026`)
 - `INDICO_DESCRIPTION`: fixed event description (e.g. Zoom info)
 

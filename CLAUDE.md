@@ -10,7 +10,7 @@ Group meeting scheduler for a PhD research group. Static frontend on GitHub Page
 
 **Frontend** (`index.html`, `js/`, `css/`): Alpine.js for reactivity, Pico CSS for styling. Single-page app with modals for volunteer/opt-out/swap/random-assign/poll actions, plus an archive section and organizer tools.
 
-**Backend** (`apps-script/Code.gs`): Google Apps Script deployed as a Web App. `doGet` returns schedule/members/opt-outs/archive/poll/indico data as JSON. `doPost` dispatches actions with `LockService` for concurrency. Post-lock Slack notifications are sent after each successful action (never inside the lock window). Three time-driven triggers: `checkSaturdayCancellation` (Saturday), `sendMondayAnnouncement` (Monday), `sendDailyPresenterReminder` (daily).
+**Backend** (`apps-script/Code.gs`): Google Apps Script deployed as a Web App. `doGet` returns schedule/members/opt-outs/archive/poll/indico data as JSON. `doPost` dispatches actions with `LockService` for concurrency. Post-lock Slack notifications are sent after each successful action (never inside the lock window). Three time-driven triggers: `checkSaturdayCancellation` (Saturday midnight), `sendThursdayReminder` (Thursday 9 AM, channel announcement), `sendPresenterReminder` (Thursday 9 AM, DM 11 days ahead).
 
 **Data flow**: Frontend → `API.post(action, payload)` → Apps Script → Google Sheets (6 tabs: Schedule, Members, OptOuts, Log, PollResponses, Archive).
 
@@ -29,7 +29,7 @@ No build step. Open `index.html` in a browser. Works without a backend configure
 - **Frontend**: Push to the GitHub Pages branch (configured in Settings > Pages) → auto-deploys from root
 - **Backend**: Edit Code.gs in Apps Script → **Deploy > New deployment** (required for every code change)
 - **Sheet setup**: Run `setupSheets()` or `resetAndSetupSheets()` from Apps Script editor
-- **Triggers**: Saturday auto-cancel, Monday announcement, daily reminders — all manually created in Apps Script Triggers (see SETUP.md steps 6, 10)
+- **Triggers**: Saturday auto-cancel, Thursday channel reminder, Thursday presenter DM — all manually created in Apps Script Triggers (see SETUP.md steps 6, 10)
 
 ## Key Conventions
 
@@ -45,7 +45,7 @@ No build step. Open `index.html` in a browser. Works without a backend configure
 - `checkSaturdayCancellation()` marks empty Monday slots as Cancelled on Saturday night
 - Schedule generation runs client-side in `Scheduler.generateSchedule()`, then saves via `archiveAndSave` action
 - `js/config.js` contains the shared secret — committed to repo (low-sensitivity group tool)
-- Slack/Indico credentials stored in Apps Script **Script Properties** (SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, INDICO_API_TOKEN, INDICO_USERNAME, INDICO_PASSWORD, INDICO_BASE_URL, INDICO_CATEGORY_ID)
+- Slack/Indico credentials stored in Apps Script **Script Properties** (SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, INDICO_API_TOKEN, INDICO_USERNAME, INDICO_PASSWORD, INDICO_BASE_URL, INDICO_CATEGORY_ID, INDICO_ROOM_NAME, INDICO_DESCRIPTION)
 - INDICO_API_TOKEN is used for read-only export API; INDICO_USERNAME/PASSWORD auto-login for web UI actions (create/delete/update events); session cached 30 min
 - Members sheet has a `SlackUserID` column for DM targeting; empty = no DMs for that member
 - Indico events fetched server-side with `CacheService` (1-hour TTL), included in `doGet` response

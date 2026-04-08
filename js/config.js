@@ -14,14 +14,13 @@ const CONFIG = {
   // To start a new semester: update label, start, end, and HOLIDAYS
   SEMESTER: {
     label: 'Spring 2026',
-    start: '2026-03-30',
+    start: '2026-04-20',
     end: '2026-09-28'
   },
 
   // Geneva, Switzerland public holidays that fall on meeting Mondays
   // Update this array each semester. Only include dates within the semester range.
   HOLIDAYS: [
-    { date: '2026-04-06', label: 'Easter Monday' },
     { date: '2026-05-25', label: 'Whit Monday' }
   ],
 

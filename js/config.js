@@ -33,7 +33,7 @@ const CONFIG = {
 
   // Members in round-robin order
   MEMBERS: [
-    'Andreas', 'Frank', 'Giovanni', 'Guillaume', 'Ivan',
+    'Andreas', 'Frank', 'Giovanni', 'Ivan',
     'Jona', 'Matej', 'Pradyun', 'Stephen', 'Theresa', 'Vincent'
   ],
 

@@ -14,7 +14,7 @@ const CONFIG = {
   // To start a new semester: update label, start, end, and HOLIDAYS
   SEMESTER: {
     label: 'Spring 2026',
-    start: '2026-04-27',
+    start: '2026-05-04',
     end: '2026-09-28'
   },
 
@@ -33,7 +33,7 @@ const CONFIG = {
 
   // Members in round-robin order
   MEMBERS: [
-    'Andreas', 'Frank', 'Giovanni', 'Ivan',
+    'Andrea', 'Andreas', 'Frank', 'Giovanni', 'Ivan',
     'Jona', 'Matej', 'Pradyun', 'Stephen', 'Theresa', 'Vincent'
   ],
 

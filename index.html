@@ -181,7 +181,11 @@
           <template x-for="m in members" :key="m">
             <option :value="m" x-text="m"></option>
           </template>
+          <option value="__other__">Other (external presenter)</option>
         </select>
+      </label>
+      <label x-show="volName === '__other__'" x-transition>Custom Name
+        <input type="text" x-model="volCustomName" placeholder="Enter presenter name">
       </label>
       <label>Preferred Date
         <select x-model="volDate">
@@ -197,7 +201,11 @@
           <template x-for="t in $store.types" :key="t">
             <option :value="t" x-text="t"></option>
           </template>
+          <option value="__other__">Other</option>
         </select>
+      </label>
+      <label x-show="volType === '__other__'" x-transition>Custom Type
+        <input type="text" x-model="volCustomType" placeholder="Enter presentation type">
       </label>
       <label>Topic
         <input type="text" x-model="volTopic" placeholder="What will you present?">

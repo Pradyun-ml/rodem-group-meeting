@@ -16,6 +16,70 @@ Group meeting scheduler for a PhD research group. Static frontend on GitHub Page
 
 **Offline fallback**: If `APPS_SCRIPT_URL` is empty or the backend is unreachable, the app runs from `CONFIG.DEFAULT_SCHEDULE` in memory. Forms apply changes locally.
 
+## How It Works (Plain English)
+
+Every Monday at 3 PM, one person from the 11-member group presents. This website decides who presents when and lets people make changes throughout the semester. The Google Sheet is the database; the website is the interface on top.
+
+### Step 0: Before the semester — everyone fills in the poll
+
+Each member clicks **"Semester Poll"** on the website and:
+1. Selects their name
+2. Checks boxes for Mondays they **cannot** present (e.g. "I'm at a conference Apr 13 and Apr 20")
+3. Optionally picks ONE **preferred** date to present
+4. Submits — their response is saved to the PollResponses sheet
+
+Responses accumulate until the organizer generates the schedule. Submitting early matters because preferred dates are first-come-first-served.
+
+### Step 1: The organizer generates the schedule
+
+Open **Organizer Tools** at the bottom of the page → **"Generate Schedule from Poll"**. The algorithm:
+
+1. **Remove holidays** — Easter Monday and Whit Monday become "No Meeting" weeks. 27 Mondays → 25 available.
+2. **Place 2 buffer weeks** — Spare weeks at roughly 1/3 and 2/3 through the semester. These absorb cancellations later. 25 → **23 presentation weeks** for 11 people.
+3. **Honour preferred dates (first come, first served)** — If Giovanni submitted first and asked for Jun 1, he gets it. Later requests for the same date are ignored.
+4. **Fill remaining slots by round-robin** — Members who haven't presented recently (higher credits) go first. Each person gets ~2 presentations; some get 3 to fill all 23 weeks.
+5. **Respect unavailability** — If a member marked a date as unavailable, the algorithm skips them for that date.
+
+A preview table is shown before anything is saved.
+
+### Step 2: Save the schedule
+
+Click **"Save & Archive Current"**. This:
+1. Archives the old semester to the Archive tab
+2. Writes the new 27-week schedule as the live schedule
+3. Clears poll responses (consumed by the algorithm)
+4. Auto-creates Indico calendar events for each presentation week (if configured)
+
+### Step 3: During the semester — handling changes
+
+**3a. Volunteering** ("I Want to Present") — No deadline. Pick a date, fill in type/topic. If the slot has someone, you're added as co-presenter ("Frank & Giovanni"). If the slot was auto-cancelled, volunteering reverses it.
+
+**3b. Opt-out** ("I Can't Present") — Deadline: 6 days before (Tuesday of the prior week). The system moves you to the next buffer week and auto-assigns a random replacement weighted by fairness. Example: Frank opts out of May 4 → moved to buffer Jun 1, Ivan auto-assigned as replacement.
+
+**3c. Swap** ("Swap Dates") — No deadline. Two members trade their next upcoming dates. Both see a preview before confirming.
+
+**3d. Emergency Cancel** (link at bottom of page) — No deadline, even day-of. Meeting marked "Cancelled" with no replacement. For genuine emergencies only. You're moved to a buffer week.
+
+**3e. Random Assignment** ("Assign Random Speaker") — Organizer picks an empty slot. System selects a random member weighted by credits (higher = more likely). Recent presenters (last 2 weeks) and opt-outs are excluded. Organizer can re-roll or confirm.
+
+### Step 4: Automatic weekly triggers
+
+- **Thursday 9 AM**: Slack reminder to #physics-general with Monday's meeting details + personal DM to the presenter whose talk is 11 days away
+- **Saturday midnight**: If Monday's slot is still empty → auto-marked "Cancelled", Slack notified, Indico event deleted. Volunteering after this reverses the cancellation.
+
+### Fairness system (credits)
+
+Each week: non-presenters get +1 credit, presenters reset to 0. Higher credits = haven't presented recently = higher priority in schedule generation and random assignment. **Jain's Fairness Index** (shown at the bottom of the page, click for details) targets >= 0.90 where 1.0 = perfectly fair.
+
+### Full lifecycle summary
+
+```
+Before semester:  Members fill poll → organizer generates schedule → saves (archives old)
+During semester:  Thu reminder → Sat auto-cancel → Mon meeting
+                  Anytime: volunteer, swap, opt-out (6-day deadline),
+                           emergency cancel (no deadline), random assign
+```
+
 ## Critical: CORS Pattern
 
 All POST requests **must** use `Content-Type: text/plain` (not `application/json`). Apps Script returns 302 redirects and cannot handle OPTIONS preflight. The body is still JSON — parsed server-side with `JSON.parse(e.postData.contents)`. All fetches use `redirect: 'follow'`.

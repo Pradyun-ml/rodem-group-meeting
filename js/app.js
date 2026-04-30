@@ -28,8 +28,10 @@ document.addEventListener('alpine:init', () => {
 
     // Volunteer form
     volName: '',
+    volCustomName: '',
     volDate: '',
     volType: '',
+    volCustomType: '',
     volTopic: '',
     volAbstract: '',
     volSubmitting: false,
@@ -234,54 +236,58 @@ document.addEventListener('alpine:init', () => {
 
     openVolunteerModal() {
       this.volName = '';
+      this.volCustomName = '';
       this.volDate = '';
       this.volType = '';
+      this.volCustomType = '';
       this.volTopic = '';
       this.volAbstract = '';
       this.showVolunteerModal = true;
     },
 
     async submitVolunteer() {
-      if (!this.volName || !this.volDate || !this.volType || !this.volTopic) {
+      const effectiveName = this.volName === '__other__' ? this.volCustomName.trim() : this.volName;
+      const effectiveType = this.volType === '__other__' ? this.volCustomType.trim() : this.volType;
+      if (!effectiveName || !this.volDate || !effectiveType || !this.volTopic) {
         this.notify('Please fill in Name, Date, Type, and Topic.', 'error');
         return;
       }
       this.volSubmitting = true;
 
-      const res = await API.volunteer(this.volName, this.volDate, this.volType, this.volTopic, this.volAbstract);
+      const res = await API.volunteer(effectiveName, this.volDate, effectiveType, this.volTopic, this.volAbstract);
 
       if (res.success) {
         const msg = res.reversedCancellation
-          ? `${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)} \u2014 cancellation reversed!`
-          : `${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)}!`;
+          ? `${effectiveName} volunteered for ${Scheduler.formatDate(this.volDate)} \u2014 cancellation reversed!`
+          : `${effectiveName} volunteered for ${Scheduler.formatDate(this.volDate)}!`;
         this.notify(msg);
         this.showVolunteerModal = false;
         await this.loadData();
       } else if (res.error) {
         this.notify(res.error, 'error');
         if (res.error.includes('not configured')) {
-          this.applyVolunteerLocally();
+          this.applyVolunteerLocally(effectiveName, effectiveType);
         }
       }
       this.volSubmitting = false;
     },
 
-    applyVolunteerLocally() {
+    applyVolunteerLocally(name, type) {
       const entry = this.schedule.find(s => s.date === this.volDate);
       if (!entry) return;
       const wasCancelled = entry.status === 'Cancelled';
       if (entry.presenter && entry.status !== 'Empty' && entry.status !== 'Cancelled' && entry.status !== 'Buffer') {
-        entry.presenter += ` & ${this.volName}`;
+        entry.presenter += ` & ${name}`;
       } else {
-        entry.presenter = this.volName;
+        entry.presenter = name;
       }
-      entry.type = this.volType;
+      entry.type = type;
       entry.topic = this.volTopic;
       entry.abstract = this.volAbstract;
       entry.status = 'Volunteered';
       this.showVolunteerModal = false;
       const extra = wasCancelled ? ' (cancellation reversed, local only)' : ' (local only)';
-      this.notify(`${this.volName} volunteered for ${Scheduler.formatDate(this.volDate)}${extra}.`);
+      this.notify(`${name} volunteered for ${Scheduler.formatDate(this.volDate)}${extra}.`);
     },
 
     // ===== Opt-out form =====

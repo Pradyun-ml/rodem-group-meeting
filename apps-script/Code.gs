@@ -327,10 +327,9 @@ function fetchIndicoEvents() {
 
     var baseUrl = getIndicoBaseUrl();
     var categoryId = getIndicoCategoryId();
-    var url = baseUrl + '/export/categ/' + categoryId + '.json?from=today&to=+90d';
+    var url = baseUrl + '/export/categ/' + categoryId + '.json?from=today&to=%2B90d&ak=' + token;
 
     var res = UrlFetchApp.fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + token },
       muteHttpExceptions: true
     });
 
@@ -507,10 +506,10 @@ function createIndicoEvent(dateStr, presenterName) {
   var session = getIndicoSession();
   if (!session) return '';
 
-  // If event already exists, update instead
+  // If event already exists, set contribution instead
   var existing = findIndicoUrlForDate(dateStr);
   if (existing) {
-    updateIndicoChairperson(dateStr, presenterName);
+    setIndicoContribution(dateStr, presenterName);
     return existing;
   }
 
@@ -561,6 +560,7 @@ function createIndicoEvent(dateStr, presenterName) {
     logAction(getSpreadsheet(), 'indicoCreate', 'Created event for ' + dateStr + ' (HTTP ' + code + ')');
 
     // Try to extract URL from JSON response
+    var createdUrl = '';
     try {
       var json = JSON.parse(body);
       // Response is e.g. {"redirect":"/event/2091/manage/","success":true}
@@ -570,23 +570,34 @@ function createIndicoEvent(dateStr, presenterName) {
         rawUrl = rawUrl.replace(/\/manage\/?$/, '/');
         // Prepend base URL if relative
         if (rawUrl.charAt(0) === '/') rawUrl = baseUrl + rawUrl;
-        return rawUrl;
+        createdUrl = rawUrl;
       }
     } catch (e) {}
 
     // Check redirect location header
-    var resHeaders = res.getHeaders();
-    if (resHeaders && resHeaders['Location']) {
-      var loc = resHeaders['Location'];
-      if (loc.charAt(0) === '/') loc = baseUrl + loc;
-      return loc.replace(/\/manage\/?$/, '/');
+    if (!createdUrl) {
+      var resHeaders = res.getHeaders();
+      if (resHeaders && resHeaders['Location']) {
+        var loc = resHeaders['Location'];
+        if (loc.charAt(0) === '/') loc = baseUrl + loc;
+        createdUrl = loc.replace(/\/manage\/?$/, '/');
+      }
     }
 
     // Fallback: look up the newly created event from the category
-    var eventUrl = findIndicoUrlForDate(dateStr);
-    if (eventUrl) return eventUrl;
+    if (!createdUrl) {
+      createdUrl = findIndicoUrlForDate(dateStr) || '';
+    }
 
-    return '';
+    // Add contribution with presenter name on the newly created event
+    if (createdUrl && presenterName) {
+      try {
+        var newEventId = extractIndicoEventId(createdUrl);
+        if (newEventId) addIndicoContributionToEvent(baseUrl, newEventId, dateStr, presenterName, session);
+      } catch (e) { indicoFailureNotification('update', dateStr, e.message); }
+    }
+
+    return createdUrl;
   } catch (e) {
     indicoFailureNotification('create', dateStr, e.message);
     return '';
@@ -636,16 +647,117 @@ function deleteIndicoEvent(dateStr) {
 }
 
 /**
- * Update the chairperson/person link on an existing Indico event.
+ * Add a contribution to an Indico event's timetable.
+ * Low-level: requires eventId, dateStr (YYYY-MM-DD), and active session.
+ * Returns true on success.
+ */
+function addIndicoContributionToEvent(baseUrl, eventId, dateStr, presenterName, session) {
+  // Indico timetable expects day as YYYY/MM/DD query param
+  var dayParam = dateStr.replace(/-/g, '/');
+
+  var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/timetable/', session);
+
+  var roomName = getIndicoRoomName();
+  var locationData = {address: '', inheriting: true};
+  if (roomName) locationData.room_name = roomName;
+
+  var personLinkData = JSON.stringify([{
+    firstName: '',
+    familyName: presenterName,
+    email: '',
+    affiliation: '',
+    phone: '',
+    title: '',
+    name: presenterName,
+    displayOrder: 0,
+    isSpeaker: true,
+    isSubmitter: true,
+    authorType: 0
+  }]);
+
+  var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
+    + '&title=' + encodeURIComponent(presenterName)
+    + '&description='
+    + '&time=' + encodeURIComponent('15:00')
+    + '&duration=' + encodeURIComponent('20')
+    + '&duration=' + encodeURIComponent('minutes')
+    + '&person_link_data=' + encodeURIComponent(personLinkData)
+    + '&location_data=' + encodeURIComponent(JSON.stringify(locationData))
+    + '&references=' + encodeURIComponent('[]')
+    + '&board_number='
+    + '&code=';
+
+  var res = UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/timetable/add-contribution?day=' + encodeURIComponent(dayParam), {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: {
+      'Cookie': 'indico_session=' + session,
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    payload: payload,
+    muteHttpExceptions: true,
+    followRedirects: false
+  });
+
+  return res.getResponseCode() >= 200 && res.getResponseCode() < 400;
+}
+
+/**
+ * Remove all timetable contributions from an Indico event.
+ * Fetches the event via the export API to get contribution IDs, then deletes each.
+ */
+function clearIndicoContributions(baseUrl, eventId, session) {
+  var token = getIndicoApiToken();
+  if (!token) return;
+
+  try {
+    var res = UrlFetchApp.fetch(baseUrl + '/export/event/' + eventId + '.json?detail=contributions&ak=' + token, {
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() !== 200) return;
+
+    var json = JSON.parse(res.getContentText());
+    var results = json.results || [];
+    if (results.length === 0) return;
+
+    var contribs = results[0].contributions || [];
+    for (var i = 0; i < contribs.length; i++) {
+      var contribId = contribs[i].id;
+      if (!contribId) continue;
+
+      var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/contributions/' + contribId + '/', session);
+
+      UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/contributions/' + contribId + '/', {
+        method: 'delete',
+        headers: {
+          'Cookie': 'indico_session=' + session,
+          'X-CSRF-Token': csrfToken,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        muteHttpExceptions: true,
+        followRedirects: false
+      });
+
+      Utilities.sleep(300);
+    }
+  } catch (e) {
+    // Best-effort: if clearing fails, we still add the new contribution
+  }
+}
+
+/**
+ * Set the contribution on an Indico event for a given date.
+ * Clears existing contributions first (for swaps/replacements), then adds new one.
  * If no event exists, creates one instead. Never throws.
  */
-function updateIndicoChairperson(dateStr, newPresenterName) {
+function setIndicoContribution(dateStr, presenterName) {
   var session = getIndicoSession();
   if (!session) return;
 
   var url = findIndicoUrlForDate(dateStr);
   if (!url) {
-    createIndicoEvent(dateStr, newPresenterName);
+    createIndicoEvent(dateStr, presenterName);
     return;
   }
 
@@ -655,26 +767,11 @@ function updateIndicoChairperson(dateStr, newPresenterName) {
   try {
     var baseUrl = getIndicoBaseUrl();
 
-    // Fetch CSRF token from the event management page
-    var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
-
-    var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
-      + '&person_link_data=' + encodeURIComponent(JSON.stringify([{name: newPresenterName}]));
-
-    UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/', {
-      method: 'post',
-      contentType: 'application/x-www-form-urlencoded',
-      headers: {
-        'Cookie': 'indico_session=' + session,
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      payload: payload,
-      muteHttpExceptions: true,
-      followRedirects: false
-    });
+    clearIndicoContributions(baseUrl, eventId, session);
+    addIndicoContributionToEvent(baseUrl, eventId, dateStr, presenterName, session);
 
     clearIndicoCache();
-    logAction(getSpreadsheet(), 'indicoUpdate', 'Updated chairperson for ' + dateStr + ' to ' + newPresenterName);
+    logAction(getSpreadsheet(), 'indicoUpdate', 'Set contribution for ' + dateStr + ' to ' + presenterName);
   } catch (e) {
     indicoFailureNotification('update', dateStr, e.message);
   }
@@ -759,6 +856,40 @@ function testIndicoLogin() {
     Logger.log('FAILED — no session cookie');
     Logger.log('Response body (first 2000): ' + loginRes.getContentText().substring(0, 2000));
   }
+}
+
+/**
+ * One-off utility: add contributions to all existing Indico events
+ * from the current Schedule sheet. Run manually from Apps Script editor.
+ * Does not modify the schedule — only updates Indico event timetables.
+ */
+function backfillIndicoContributions() {
+  var ss = getSpreadsheet();
+  var schedule = readSchedule(ss);
+  var updated = 0;
+  var skipped = 0;
+
+  for (var i = 0; i < schedule.length; i++) {
+    var entry = schedule[i];
+    if (!entry.presenter || entry.status === 'Holiday' || entry.status === 'Buffer') {
+      skipped++;
+      continue;
+    }
+
+    try {
+      setIndicoContribution(entry.date, entry.presenter);
+      updated++;
+      Logger.log('Added contribution for ' + entry.date + ': ' + entry.presenter);
+    } catch (e) {
+      Logger.log('Failed for ' + entry.date + ': ' + e.message);
+    }
+
+    // Rate limiting — extra time since each call fetches event, clears, and adds
+    Utilities.sleep(1000);
+  }
+
+  Logger.log('Done. Updated: ' + updated + ', Skipped: ' + skipped);
+  logAction(ss, 'backfillContributions', 'Added contributions to ' + updated + ' Indico events');
 }
 
 function testIndicoCreate() {
@@ -1023,7 +1154,7 @@ function handleOptOut(body) {
   // Auto-update/delete Indico event
   try {
     if (autoAssigned) {
-      updateIndicoChairperson(targetDate, autoAssigned);
+      setIndicoContribution(targetDate, autoAssigned);
     } else if (remaining.length === 0) {
       deleteIndicoEvent(targetDate);
     }
@@ -1136,8 +1267,8 @@ function handleSwap(body) {
 
   // Auto-update Indico events for both dates
   try {
-    updateIndicoChairperson(body.date1, body.member2);
-    updateIndicoChairperson(body.date2, body.member1);
+    setIndicoContribution(body.date1, body.member2);
+    setIndicoContribution(body.date2, body.member1);
   } catch (e) { indicoFailureNotification('update', body.date1 + '/' + body.date2, e.message); }
 
   return { success: true };

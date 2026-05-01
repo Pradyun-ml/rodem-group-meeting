@@ -329,13 +329,23 @@ function fetchIndicoEvents() {
     var categoryId = getIndicoCategoryId();
     var url = baseUrl + '/export/categ/' + categoryId + '.json?from=today&to=%2B90d&ak=' + token;
 
-    var res = UrlFetchApp.fetch(url, {
-      muteHttpExceptions: true
-    });
+    var res;
+    try {
+      res = UrlFetchApp.fetch(url, {
+        muteHttpExceptions: true,
+        validateHttpsCertificates: false
+      });
+    } catch (e) {
+      // Network error (Indico down) — cache empty result for 5 min to avoid hammering
+      try { logAction(getSpreadsheet(), 'indicoError', 'fetchIndicoEvents failed: ' + e.message); } catch (ignored) {}
+      cache.put('indicoEvents', '[]', 180);
+      return [];
+    }
 
     var code = res.getResponseCode();
     if (code !== 200) {
       logAction(getSpreadsheet(), 'indicoError', 'Indico API returned HTTP ' + code);
+      cache.put('indicoEvents', '[]', 180);
       return [];
     }
 
@@ -357,6 +367,7 @@ function fetchIndicoEvents() {
     return events;
   } catch (e) {
     try { logAction(getSpreadsheet(), 'indicoError', 'fetchIndicoEvents failed: ' + e.message); } catch (ignored) {}
+    try { CacheService.getScriptCache().put('indicoEvents', '[]', 300); } catch (ignored) {}
     return [];
   }
 }

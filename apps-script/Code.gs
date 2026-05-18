@@ -396,6 +396,15 @@ function clearIndicoCache() {
 }
 
 /**
+ * Safety check: returns true only if dateStr (YYYY-MM-DD) falls on a Monday.
+ * All Indico write operations MUST call this to avoid modifying non-meeting events.
+ */
+function isMonday(dateStr) {
+  var d = new Date(dateStr + 'T00:00:00');
+  return d.getDay() === 1;
+}
+
+/**
  * Extract event ID from an Indico URL like https://host/event/123/
  */
 function extractIndicoEventId(url) {
@@ -514,6 +523,7 @@ function fetchIndicoManageCsrfToken(baseUrl, path, session) {
  * Returns the new event URL or '' on failure. Never throws.
  */
 function createIndicoEvent(dateStr, presenterName) {
+  if (!isMonday(dateStr)) { logAction(getSpreadsheet(), 'indicoError', 'Refused to create event for non-Monday: ' + dateStr); return ''; }
   var session = getIndicoSession();
   if (!session) return '';
 
@@ -623,6 +633,7 @@ function createIndicoEvent(dateStr, presenterName) {
  * No-op if no event exists. Never throws.
  */
 function deleteIndicoEvent(dateStr) {
+  if (!isMonday(dateStr)) { logAction(getSpreadsheet(), 'indicoError', 'Refused to delete event for non-Monday: ' + dateStr); return; }
   var session = getIndicoSession();
   if (!session) return;
 
@@ -766,6 +777,7 @@ function clearIndicoContributions(baseUrl, eventId, session) {
  * If no event exists, creates one instead. Never throws.
  */
 function setIndicoContribution(dateStr, presenterName) {
+  if (!isMonday(dateStr)) { logAction(getSpreadsheet(), 'indicoError', 'Refused to set contribution for non-Monday: ' + dateStr); return; }
   var session = getIndicoSession();
   if (!session) return;
 
@@ -911,6 +923,7 @@ function backfillIndicoContributions() {
  * Uses the event settings form at /event/{id}/manage/.
  */
 function updateIndicoDescription(dateStr, description) {
+  if (!isMonday(dateStr)) { logAction(getSpreadsheet(), 'indicoError', 'Refused to update description for non-Monday: ' + dateStr); return; }
   var session = getIndicoSession();
   if (!session) return;
 
@@ -970,6 +983,10 @@ function backfillIndicoDescriptions() {
   var updated = 0;
 
   for (var i = 0; i < events.length; i++) {
+    if (!isMonday(events[i].date)) {
+      Logger.log('Skipping non-Monday: ' + events[i].date);
+      continue;
+    }
     var eventId = extractIndicoEventId(events[i].url);
     if (!eventId) continue;
 

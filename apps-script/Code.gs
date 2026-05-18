@@ -327,7 +327,7 @@ function fetchIndicoEvents() {
 
     var baseUrl = getIndicoBaseUrl();
     var categoryId = getIndicoCategoryId();
-    var url = baseUrl + '/export/categ/' + categoryId + '.json?from=today&to=%2B90d&ak=' + token;
+    var url = baseUrl + '/export/categ/' + categoryId + '.json?from=today&to=%2B180d&ak=' + token;
 
     var res;
     try {
@@ -539,10 +539,13 @@ function createIndicoEvent(dateStr, presenterName) {
     var locationData = {address: '', inheriting: false};
     if (roomName) locationData.room_name = roomName;
 
+    var description = getIndicoDescription();
+
     var payload = 'event-creation-csrf_token=' + encodeURIComponent(csrfToken)
       + '&event-creation-create_booking=false'
       + '&event-creation-category=' + encodeURIComponent(JSON.stringify({id: catId, title: 'General'}))
       + '&event-creation-title=' + encodeURIComponent('RODEM HEP Weekly')
+      + '&event-creation-description=' + encodeURIComponent(description)
       + '&event-creation-start_dt=' + encodeURIComponent(ddmmyyyy)
       + '&event-creation-start_dt=' + encodeURIComponent('15:00')
       + '&event-creation-end_dt=' + encodeURIComponent(ddmmyyyy)
@@ -901,6 +904,106 @@ function backfillIndicoContributions() {
 
   Logger.log('Done. Updated: ' + updated + ', Skipped: ' + skipped);
   logAction(ss, 'backfillContributions', 'Added contributions to ' + updated + ' Indico events');
+}
+
+/**
+ * Update the description on an existing Indico event.
+ * Uses the event settings form at /event/{id}/manage/.
+ */
+function updateIndicoDescription(dateStr, description) {
+  var session = getIndicoSession();
+  if (!session) return;
+
+  var url = findIndicoUrlForDate(dateStr);
+  if (!url) return;
+
+  var eventId = extractIndicoEventId(url);
+  if (!eventId) return;
+
+  try {
+    var baseUrl = getIndicoBaseUrl();
+    var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
+
+    var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
+      + '&title=' + encodeURIComponent('RODEM HEP Weekly')
+      + '&description=' + encodeURIComponent(description)
+      + '&url_shortcut=';
+
+    UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/settings/data', {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      headers: {
+        'Cookie': 'indico_session=' + session,
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      payload: payload,
+      muteHttpExceptions: true,
+      followRedirects: false
+    });
+
+    logAction(getSpreadsheet(), 'indicoUpdate', 'Updated description for ' + dateStr);
+  } catch (e) {
+    indicoFailureNotification('update', dateStr, e.message);
+  }
+}
+
+/**
+ * One-off utility: set the description on all existing Indico events.
+ * Uses the INDICO_DESCRIPTION Script Property. Run manually from Apps Script editor.
+ * Iterates over Indico events directly (not the schedule) to include past events.
+ */
+function backfillIndicoDescriptions() {
+  var description = getIndicoDescription();
+  if (!description) {
+    Logger.log('No INDICO_DESCRIPTION set in Script Properties. Aborting.');
+    return;
+  }
+
+  var session = getIndicoSession();
+  if (!session) { Logger.log('No session'); return; }
+
+  var baseUrl = getIndicoBaseUrl();
+  clearIndicoCache();
+  var events = fetchIndicoEvents();
+  Logger.log('Found ' + events.length + ' Indico events');
+
+  var updated = 0;
+
+  for (var i = 0; i < events.length; i++) {
+    var eventId = extractIndicoEventId(events[i].url);
+    if (!eventId) continue;
+
+    try {
+      var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
+
+      var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
+        + '&title=' + encodeURIComponent('RODEM HEP Weekly')
+        + '&description=' + encodeURIComponent(description)
+        + '&url_shortcut=';
+
+      UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/settings/data', {
+        method: 'post',
+        contentType: 'application/x-www-form-urlencoded',
+        headers: {
+          'Cookie': 'indico_session=' + session,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        payload: payload,
+        muteHttpExceptions: true,
+        followRedirects: false
+      });
+
+      updated++;
+      Logger.log('Updated description for ' + events[i].date + ' (event ' + eventId + ')');
+    } catch (e) {
+      Logger.log('Failed for ' + events[i].date + ': ' + e.message);
+    }
+
+    Utilities.sleep(1000);
+  }
+
+  Logger.log('Done. Updated: ' + updated + ' of ' + events.length + ' events');
+  logAction(getSpreadsheet(), 'backfillDescriptions', 'Updated descriptions on ' + updated + ' Indico events');
 }
 
 function testIndicoCreate() {

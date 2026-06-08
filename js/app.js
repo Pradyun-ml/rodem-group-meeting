@@ -58,6 +58,14 @@ document.addEventListener('alpine:init', () => {
     randomResult: null,
     randomSubmitting: false,
 
+    // Assign to date (organizer)
+    showAssignToDateModal: false,
+    assignDate: '',
+    assignName: '',
+    assignType: '',
+    assignTopic: '',
+    assignSubmitting: false,
+
     // Poll form
     pollName: '',
     pollUnavailable: [],
@@ -530,6 +538,16 @@ document.addEventListener('alpine:init', () => {
       replacePres(entry1, this.swapMember1, this.swapMember2);
       replacePres(entry2, this.swapMember2, this.swapMember1);
 
+      const tmpType = entry1.type;
+      const tmpTopic = entry1.topic;
+      const tmpAbstract = entry1.abstract;
+      entry1.type = entry2.type;
+      entry1.topic = entry2.topic;
+      entry1.abstract = entry2.abstract;
+      entry2.type = tmpType;
+      entry2.topic = tmpTopic;
+      entry2.abstract = tmpAbstract;
+
       this.showSwapModal = false;
       this.notify(`Swapped: ${this.swapMember1} \u2194 ${this.swapMember2} (local only).`);
     },
@@ -587,6 +605,53 @@ document.addEventListener('alpine:init', () => {
       entry.status = 'TBD';
       this.showRandomModal = false;
       this.notify(`${this.randomResult} assigned to ${Scheduler.formatDate(this.randomDate)} (local only).`);
+    },
+
+    // ===== Assign to date (organizer) =====
+
+    openAssignToDateModal() {
+      this.assignDate = '';
+      this.assignName = '';
+      this.assignType = '';
+      this.assignTopic = '';
+      this.showAssignToDateModal = true;
+    },
+
+    async submitAssignToDate() {
+      if (!this.assignDate || !this.assignName) {
+        this.notify('Please select a date and a member.', 'error');
+        return;
+      }
+      this.assignSubmitting = true;
+
+      const res = await API.assignToDate(this.assignDate, this.assignName, this.assignType, this.assignTopic);
+
+      if (res.success) {
+        this.notify(`${this.assignName} assigned to ${Scheduler.formatDate(this.assignDate)}!`);
+        this.showAssignToDateModal = false;
+        await this.loadData();
+      } else if (res.error) {
+        this.notify(res.error, 'error');
+        if (res.error.includes('not configured')) {
+          this.applyAssignToDateLocally();
+        }
+      }
+      this.assignSubmitting = false;
+    },
+
+    applyAssignToDateLocally() {
+      const entry = this.schedule.find(s => s.date === this.assignDate);
+      if (!entry) return;
+      if (entry.presenter && entry.status !== 'Empty' && entry.status !== 'Buffer' && entry.status !== 'Cancelled') {
+        entry.presenter += ` & ${this.assignName}`;
+      } else {
+        entry.presenter = this.assignName;
+      }
+      entry.status = 'Confirmed';
+      if (this.assignType) entry.type = this.assignType;
+      if (this.assignTopic) entry.topic = this.assignTopic;
+      this.showAssignToDateModal = false;
+      this.notify(`${this.assignName} assigned to ${Scheduler.formatDate(this.assignDate)} (local only).`);
     },
 
     // ===== Fairness tracker =====

@@ -112,6 +112,7 @@
       <summary>Organizer Tools</summary>
       <div class="organizer-actions">
         <button class="outline secondary" @click="openGenerateModal()">Generate Schedule from Poll</button>
+        <button class="outline secondary" @click="openAssignToDateModal()">Assign to Date</button>
       </div>
       <template x-if="pollResponses.length > 0">
         <p style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.7;">
@@ -336,6 +337,44 @@
           </div>
         </div>
       </template>
+    </div>
+  </div>
+
+  <!-- Assign to Date Modal (organizer) -->
+  <div class="modal-backdrop" x-show="showAssignToDateModal" x-transition @click.self="showAssignToDateModal = false" @keydown.escape.window="showAssignToDateModal = false">
+    <div class="modal-content" @click.stop>
+      <h3>Assign to Date</h3>
+      <label>Date (empty/buffer/cancelled slots)
+        <select x-model="assignDate">
+          <option value="">Select a date&hellip;</option>
+          <template x-for="entry in emptySlots" :key="entry.date">
+            <option :value="entry.date" x-text="formatDateLong(entry.date) + ' (' + entry.status + ')'"></option>
+          </template>
+        </select>
+      </label>
+      <label>Member
+        <select x-model="assignName">
+          <option value="">Select a member&hellip;</option>
+          <template x-for="m in members" :key="m">
+            <option :value="m" x-text="m"></option>
+          </template>
+        </select>
+      </label>
+      <label>Type (optional)
+        <select x-model="assignType">
+          <option value="">Select type&hellip;</option>
+          <template x-for="t in $store.types" :key="t">
+            <option :value="t" x-text="t"></option>
+          </template>
+        </select>
+      </label>
+      <label>Topic (optional)
+        <input type="text" x-model="assignTopic" placeholder="e.g. My Research Update">
+      </label>
+      <div class="modal-actions">
+        <button class="secondary outline" @click="showAssignToDateModal = false">Cancel</button>
+        <button @click="submitAssignToDate()" :aria-busy="assignSubmitting" :disabled="assignSubmitting || !assignDate || !assignName">Assign</button>
+      </div>
     </div>
   </div>
 

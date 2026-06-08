@@ -67,6 +67,10 @@ const API = {
     return this.post('assignRandom', { date, name });
   },
 
+  async assignToDate(date, name, type, topic) {
+    return this.post('assignToDate', { date, name, type, topic });
+  },
+
   async updateCredits(credits) {
     return this.post('updateCredits', { credits });
   },

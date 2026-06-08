@@ -1103,6 +1103,9 @@ function doPost(e) {
       case 'assignRandom':
         result = handleAssignRandom(body);
         break;
+      case 'assignToDate':
+        result = handleAssignToDate(body);
+        break;
       case 'updateCredits':
         result = handleUpdateCredits(body);
         break;
@@ -1150,6 +1153,10 @@ function doPost(e) {
         case 'assignRandom':
           notifyChannelReassignment(body.date, body.name, body.name + ' randomly assigned');
           notifyPresenterAssignment(ss, body.name, body.date, 'randomly assigned to present');
+          break;
+        case 'assignToDate':
+          notifyChannelReassignment(body.date, body.name, body.name + ' assigned by organizer');
+          notifyPresenterAssignment(ss, body.name, body.date, 'assigned to present');
           break;
         case 'emergencyCancel':
           notifyChannelReassignment(body.date, null,
@@ -1377,6 +1384,9 @@ function handleSwap(body) {
   var headers = data[0];
   var dateCol = headers.indexOf('Date');
   var presCol = headers.indexOf('Presenter');
+  var typeCol = headers.indexOf('Type');
+  var topicCol = headers.indexOf('Topic');
+  var abstractCol = headers.indexOf('Abstract');
 
   var row1 = findRowByDate(data, dateCol, body.date1);
   var row2 = findRowByDate(data, dateCol, body.date2);
@@ -1393,6 +1403,20 @@ function handleSwap(body) {
 
   sheet.getRange(row1, presCol + 1).setValue(newPres1);
   sheet.getRange(row2, presCol + 1).setValue(newPres2);
+
+  var type1 = (data[row1 - 1][typeCol] || '').toString();
+  var type2 = (data[row2 - 1][typeCol] || '').toString();
+  var topic1 = (data[row1 - 1][topicCol] || '').toString();
+  var topic2 = (data[row2 - 1][topicCol] || '').toString();
+  var abstract1 = (data[row1 - 1][abstractCol] || '').toString();
+  var abstract2 = (data[row2 - 1][abstractCol] || '').toString();
+
+  sheet.getRange(row1, typeCol + 1).setValue(type2);
+  sheet.getRange(row1, topicCol + 1).setValue(topic2);
+  sheet.getRange(row1, abstractCol + 1).setValue(abstract2);
+  sheet.getRange(row2, typeCol + 1).setValue(type1);
+  sheet.getRange(row2, topicCol + 1).setValue(topic1);
+  sheet.getRange(row2, abstractCol + 1).setValue(abstract1);
 
   logAction(ss, 'swap', body.member1 + ' (' + body.date1 + ') <-> ' + body.member2 + ' (' + body.date2 + ')');
 
@@ -1437,6 +1461,47 @@ function handleAssignRandom(body) {
   logAction(ss, 'assignRandom', body.name + ' randomly assigned to ' + targetDate);
 
   // Auto-create/update Indico event
+  try { createIndicoEvent(targetDate, body.name); }
+  catch (e) { indicoFailureNotification('create', targetDate, e.message); }
+
+  return { success: true };
+}
+
+function handleAssignToDate(body) {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Schedule');
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var dateCol = headers.indexOf('Date');
+  var presCol = headers.indexOf('Presenter');
+  var typeCol = headers.indexOf('Type');
+  var topicCol = headers.indexOf('Topic');
+  var statusCol = headers.indexOf('Status');
+
+  var targetDate = body.date;
+  var rowIndex = findRowByDate(data, dateCol, targetDate);
+
+  if (rowIndex === -1) {
+    return { success: false, error: 'Date not found.' };
+  }
+
+  var currentPresenter = (data[rowIndex - 1][presCol] || '').toString();
+  var currentStatus = (data[rowIndex - 1][statusCol] || '').toString();
+
+  var newPresenter;
+  if (currentPresenter && currentStatus !== 'Empty' && currentStatus !== 'Buffer' && currentStatus !== 'Cancelled') {
+    newPresenter = currentPresenter + ' & ' + body.name;
+  } else {
+    newPresenter = body.name;
+  }
+
+  sheet.getRange(rowIndex, presCol + 1).setValue(newPresenter);
+  sheet.getRange(rowIndex, statusCol + 1).setValue('Confirmed');
+  if (body.type) sheet.getRange(rowIndex, typeCol + 1).setValue(body.type);
+  if (body.topic) sheet.getRange(rowIndex, topicCol + 1).setValue(body.topic);
+
+  logAction(ss, 'assignToDate', body.name + ' assigned to ' + targetDate + (body.type ? ' (' + body.type + ')' : ''));
+
   try { createIndicoEvent(targetDate, body.name); }
   catch (e) { indicoFailureNotification('create', targetDate, e.message); }
 

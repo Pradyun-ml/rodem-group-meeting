@@ -14,7 +14,7 @@ const CONFIG = {
   // To start a new semester: update label, start, end, and HOLIDAYS
   SEMESTER: {
     label: 'Autumn 2026',
-    start: '2026-10-19',
+    start: '2026-10-26',
     end: '2026-12-14'
   },
 

@@ -13,19 +13,19 @@ const CONFIG = {
   // Current semester (6-month schedule cycle)
   // To start a new semester: update label, start, end, and HOLIDAYS
   SEMESTER: {
-    label: 'Spring 2026',
-    start: '2026-05-04',
-    end: '2026-09-28'
+    label: 'Autumn 2026',
+    start: '2026-10-19',
+    end: '2026-12-14'
   },
 
   // Geneva, Switzerland public holidays that fall on meeting Mondays
   // Update this array each semester. Only include dates within the semester range.
   HOLIDAYS: [
-    { date: '2026-05-25', label: 'Whit Monday' }
+    { date: '2026-12-14', label: 'Glühwein Workshop' }
   ],
 
   // Number of buffer weeks per semester (spread evenly through non-holiday dates)
-  BUFFER_WEEKS: 2,
+  BUFFER_WEEKS: 1,
 
   // Opt-out deadline: must opt out at least this many days before the meeting
   // 6 days before Monday = by end of Tuesday of the prior week
@@ -33,8 +33,8 @@ const CONFIG = {
 
   // Members in round-robin order
   MEMBERS: [
-    'Andrea', 'Andreas', 'Frank', 'Giovanni', 'Ivan',
-    'Jona', 'Matej', 'Pradyun', 'Stephen', 'Theresa', 'Vincent'
+    'Andrea', 'Andreas', 'Ethan', 'Frank', 'Giovanni', 'Ivan',
+    'Jona', 'Matej', 'Pedro', 'Pradyun', 'Stephen', 'Theresa', 'Vincent'
   ],
 
   // Presentation types

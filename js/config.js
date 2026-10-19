@@ -13,19 +13,25 @@ const CONFIG = {
   // Current semester (6-month schedule cycle)
   // To start a new semester: update label, start, end, and HOLIDAYS
   SEMESTER: {
-    label: 'Autumn 2026',
+    label: 'Winter 2026/27',
     start: '2026-10-26',
-    end: '2026-12-14'
+    end: '2027-02-22'
   },
 
   // Geneva, Switzerland public holidays that fall on meeting Mondays
   // Update this array each semester. Only include dates within the semester range.
+  // No Swiss national or Geneva cantonal holiday falls on a Monday this semester:
+  // Christmas (Fri 25 Dec), Restoration of the Republic (Thu 31 Dec),
+  // New Year (Fri 1 Jan) all miss Mondays. Breaks below are group-specific.
   HOLIDAYS: [
-    { date: '2026-12-14', label: 'Glühwein Workshop' }
+    { date: '2026-12-14', label: 'Glühwein Workshop' },
+    { date: '2026-12-21', label: 'Holiday Season' },
+    { date: '2026-12-28', label: 'Holiday Season' },
+    { date: '2027-01-04', label: 'Holiday Season' }
   ],
 
   // Number of buffer weeks per semester (spread evenly through non-holiday dates)
-  BUFFER_WEEKS: 1,
+  BUFFER_WEEKS: 2,
 
   // Opt-out deadline: must opt out at least this many days before the meeting
   // 6 days before Monday = by end of Tuesday of the prior week

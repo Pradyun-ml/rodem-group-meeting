@@ -618,11 +618,19 @@ function createIndicoEvent(dateStr, presenterName) {
       createdUrl = findIndicoUrlForDate(dateStr) || '';
     }
 
-    // Add contribution with presenter name on the newly created event
-    if (createdUrl && presenterName) {
+    var newEventId = createdUrl ? extractIndicoEventId(createdUrl) : '';
+
+    // The create form ignores the description field, so set it in a follow-up POST.
+    if (newEventId && description) {
       try {
-        var newEventId = extractIndicoEventId(createdUrl);
-        if (newEventId) addIndicoContributionToEvent(baseUrl, newEventId, dateStr, presenterName, session);
+        setIndicoEventDescription(baseUrl, newEventId, description, session);
+      } catch (e) { indicoFailureNotification('update', dateStr, e.message); }
+    }
+
+    // Add contribution with presenter name on the newly created event
+    if (newEventId && presenterName) {
+      try {
+        addIndicoContributionToEvent(baseUrl, newEventId, dateStr, presenterName, session);
       } catch (e) { indicoFailureNotification('update', dateStr, e.message); }
     }
 
@@ -924,8 +932,34 @@ function backfillIndicoContributions() {
 }
 
 /**
- * Update the description on an existing Indico event.
- * Uses the event settings form at /event/{id}/manage/.
+ * Low-level: set the description on an existing event by id.
+ * The create-meeting form ignores event-creation-description on v2.3.5, so this
+ * settings POST is the only path that actually sticks. Title is resubmitted
+ * because the settings form would otherwise blank it.
+ */
+function setIndicoEventDescription(baseUrl, eventId, description, session) {
+  var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
+
+  var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
+    + '&title=' + encodeURIComponent('RODEM HEP Weekly')
+    + '&description=' + encodeURIComponent(description)
+    + '&url_shortcut=';
+
+  UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/settings/data', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: {
+      'Cookie': 'indico_session=' + session,
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    payload: payload,
+    muteHttpExceptions: true,
+    followRedirects: false
+  });
+}
+
+/**
+ * Update the description on an existing Indico event, by date.
  */
 function updateIndicoDescription(dateStr, description) {
   if (!isMonday(dateStr)) { logAction(getSpreadsheet(), 'indicoError', 'Refused to update description for non-Monday: ' + dateStr); return; }
@@ -939,26 +973,7 @@ function updateIndicoDescription(dateStr, description) {
   if (!eventId) return;
 
   try {
-    var baseUrl = getIndicoBaseUrl();
-    var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
-
-    var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
-      + '&title=' + encodeURIComponent('RODEM HEP Weekly')
-      + '&description=' + encodeURIComponent(description)
-      + '&url_shortcut=';
-
-    UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/settings/data', {
-      method: 'post',
-      contentType: 'application/x-www-form-urlencoded',
-      headers: {
-        'Cookie': 'indico_session=' + session,
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      payload: payload,
-      muteHttpExceptions: true,
-      followRedirects: false
-    });
-
+    setIndicoEventDescription(getIndicoBaseUrl(), eventId, description, session);
     logAction(getSpreadsheet(), 'indicoUpdate', 'Updated description for ' + dateStr);
   } catch (e) {
     indicoFailureNotification('update', dateStr, e.message);
@@ -996,25 +1011,7 @@ function backfillIndicoDescriptions() {
     if (!eventId) continue;
 
     try {
-      var csrfToken = fetchIndicoManageCsrfToken(baseUrl, '/event/' + eventId + '/manage/', session);
-
-      var payload = 'csrf_token=' + encodeURIComponent(csrfToken)
-        + '&title=' + encodeURIComponent('RODEM HEP Weekly')
-        + '&description=' + encodeURIComponent(description)
-        + '&url_shortcut=';
-
-      UrlFetchApp.fetch(baseUrl + '/event/' + eventId + '/manage/settings/data', {
-        method: 'post',
-        contentType: 'application/x-www-form-urlencoded',
-        headers: {
-          'Cookie': 'indico_session=' + session,
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        payload: payload,
-        muteHttpExceptions: true,
-        followRedirects: false
-      });
-
+      setIndicoEventDescription(baseUrl, eventId, description, session);
       updated++;
       Logger.log('Updated description for ' + events[i].date + ' (event ' + eventId + ')');
     } catch (e) {

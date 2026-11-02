@@ -550,6 +550,11 @@ function createIndicoEvent(dateStr, presenterName) {
     if (roomName) locationData.room_name = roomName;
 
     var description = getIndicoDescription();
+    // Blank descriptions used to pass silently, leaving events with no Zoom link.
+    if (!description) {
+      logAction(getSpreadsheet(), 'indicoWarning',
+        'INDICO_DESCRIPTION is empty — creating ' + dateStr + ' with no description');
+    }
 
     var payload = 'event-creation-csrf_token=' + encodeURIComponent(csrfToken)
       + '&event-creation-create_booking=false'

@@ -64,7 +64,7 @@ Click **"Save & Archive Current"**. This:
 
 ### Step 4: Automatic weekly triggers
 
-- **Thursday 9 AM**: Slack reminder to #physics-general with Monday's meeting details + personal DM to the presenter whose talk is 11 days away
+- **Thursday 9 AM**: Slack reminder to #group-meeting-updates with Monday's meeting details + personal DM to the presenter whose talk is 11 days away
 - **Saturday midnight**: If Monday's slot is still empty → auto-marked "Cancelled", Slack notified, Indico event deleted. Volunteering after this reverses the cancellation.
 
 ### Fairness system (credits)

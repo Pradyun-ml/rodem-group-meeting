@@ -180,7 +180,7 @@ If auto-creation fails, a warning is posted to Slack — create the event manual
 ### Channel Notifications (Incoming Webhook)
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new Slack App for your workspace
-2. Enable **Incoming Webhooks** and create a webhook for your channel (e.g. `#physics-general`)
+2. Enable **Incoming Webhooks** and create a webhook for your channel (e.g. `#group-meeting-updates`)
 3. In Apps Script **Project Settings > Script Properties**, add:
    - `SLACK_WEBHOOK_URL`: the webhook URL
 

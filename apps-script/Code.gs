@@ -12,7 +12,7 @@
  *
  * Script Properties (Project Settings > Script Properties):
  *   SECRET              — shared auth secret (must match config.js)
- *   SLACK_WEBHOOK_URL   — Slack incoming webhook for #physics-general (optional)
+ *   SLACK_WEBHOOK_URL   — Slack incoming webhook for #group-meeting-updates (optional)
  *   SLACK_BOT_TOKEN     — Slack bot token with chat:write scope (optional)
  *   INDICO_API_TOKEN    — Indico personal API token with read scope (optional)
  *   INDICO_USERNAME     — Indico login username for web UI auth (event create/delete/update)
@@ -155,7 +155,7 @@ function getIndicoDescription() {
 // ============================================================
 
 /**
- * Post a message to #physics-general via incoming webhook.
+ * Post a message to #group-meeting-updates via incoming webhook.
  * Never throws — errors are logged silently.
  */
 function sendSlackWebhook(text) {
@@ -232,7 +232,7 @@ function formatDateForSlack(dateStr) {
 // ============================================================
 
 /**
- * Post the Monday morning meeting announcement to #physics-general.
+ * Post the Monday morning meeting announcement to #group-meeting-updates.
  */
 function notifyChannelAnnouncement(dateStr, presenter, type, topic, status, indicoUrl) {
   var formattedDate = formatDateForSlack(dateStr);
@@ -281,7 +281,7 @@ function notifyPresenterReminder(ss, memberName, dateStr, daysAway, topic) {
 }
 
 /**
- * Post a schedule change notification to #physics-general.
+ * Post a schedule change notification to #group-meeting-updates.
  */
 function notifyChannelReassignment(dateStr, newPresenter, description) {
   var formattedDate = formatDateForSlack(dateStr);
@@ -1665,7 +1665,7 @@ function checkSaturdayCancellation() {
 
 /**
  * Thursday midweek reminder trigger.
- * Posts the upcoming Monday's meeting details to #physics-general.
+ * Posts the upcoming Monday's meeting details to #group-meeting-updates.
  *
  * To set up:
  *   1. In Apps Script, go to Triggers (clock icon)
